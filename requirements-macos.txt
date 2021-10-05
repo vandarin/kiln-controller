@@ -1,0 +1,8 @@
+setuptools
+greenlet
+bottle
+gevent
+gevent-websocket
+git+https://github.com/sn4k3/FakeRPi
+Adafruit-MAX31855
+Adafruit-GPIO

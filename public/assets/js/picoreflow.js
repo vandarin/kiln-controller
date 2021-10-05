@@ -1,6 +1,6 @@
 var state = "IDLE";
 var state_last = "";
-var graph = [ 'profile', 'live'];
+var graph = ['profile', 'live'];
 var points = [];
 var profiles = [];
 var time_mode = 0;
@@ -19,13 +19,13 @@ if (window.location.protocol == 'https:') {
     protocol = 'wss:';
 }
 var host = "" + protocol + "//" + window.location.hostname + ":" + window.location.port;
-var ws_status = new WebSocket(host+"/status");
-var ws_control = new WebSocket(host+"/control");
-var ws_config = new WebSocket(host+"/config");
-var ws_storage = new WebSocket(host+"/storage");
+var ws_status = new WebSocket(host + "/status");
+var ws_control = new WebSocket(host + "/control");
+var ws_config = new WebSocket(host + "/config");
+var ws_storage = new WebSocket(host + "/storage");
 
 
-if(window.webkitRequestAnimationFrame) window.requestAnimationFrame = window.webkitRequestAnimationFrame;
+if (window.webkitRequestAnimationFrame) window.requestAnimationFrame = window.webkitRequestAnimationFrame;
 
 graph.profile =
 {
@@ -46,23 +46,21 @@ graph.live =
 };
 
 
-function updateProfile(id)
-{
+function updateProfile(id) {
     selected_profile = id;
     selected_profile_name = profiles[id].name;
-    var job_seconds = profiles[id].data.length === 0 ? 0 : parseInt(profiles[id].data[profiles[id].data.length-1][0]);
-    var kwh = (3850*job_seconds/3600/1000).toFixed(2);
-    var cost =  (kwh*kwh_rate).toFixed(2);
+    var job_seconds = profiles[id].data.length === 0 ? 0 : parseInt(profiles[id].data[profiles[id].data.length - 1][0]);
+    var kwh = (3850 * job_seconds / 3600 / 1000).toFixed(2);
+    var cost = (kwh * kwh_rate).toFixed(2);
     var job_time = new Date(job_seconds * 1000).toISOString().substr(11, 8);
     $('#sel_prof').html(profiles[id].name);
     $('#sel_prof_eta').html(job_time);
-    $('#sel_prof_cost').html(kwh + ' kWh ('+ currency_type +': '+ cost +')');
+    $('#sel_prof_cost').html(kwh + ' kWh (' + currency_type + ': ' + cost + ')');
     graph.profile.data = profiles[id].data;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+    updateGraph();
 }
 
-function deleteProfile()
-{
+function deleteProfile() {
     var profile = { "type": "profile", "data": "", "name": selected_profile_name };
     var delete_struct = { "cmd": "DELETE", "profile": profile };
 
@@ -74,7 +72,7 @@ function deleteProfile()
     ws_storage.send('GET');
     selected_profile_name = profiles[0].name;
 
-    state="IDLE";
+    state = "IDLE";
     $('#edit').hide();
     $('#profile_selector').show();
     $('#btn_controls').show();
@@ -83,46 +81,41 @@ function deleteProfile()
     $('#e2').select2('val', 0);
     graph.profile.points.show = false;
     graph.profile.draggable = false;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
 }
 
 
-function updateProgress(percentage)
-{
-    if(state=="RUNNING")
-    {
-        if(percentage > 100) percentage = 100;
-        $('#progressBar').css('width', percentage+'%');
-        if(percentage>5) $('#progressBar').html(parseInt(percentage)+'%');
+function updateProgress(percentage) {
+    if (state == "RUNNING") {
+        if (percentage > 100) percentage = 100;
+        $('#progressBar').css('width', percentage + '%');
+        if (percentage > 5) $('#progressBar').html(parseInt(percentage) + '%');
     }
-    else
-    {
-        $('#progressBar').css('width', 0+'%');
+    else {
+        $('#progressBar').css('width', 0 + '%');
         $('#progressBar').html('');
     }
 }
 
-function updateProfileTable()
-{
+function updateProfileTable() {
     var dps = 0;
     var slope = "";
     var color = "";
 
     var html = '<h3>Schedule Points</h3><div class="table-responsive" style="scroll: none"><table class="table table-striped">';
-        html += '<tr><th style="width: 50px">#</th><th>Target Time in ' + time_scale_long+ '</th><th>Target Temperature in °'+temp_scale_display+'</th><th>Slope in &deg;'+temp_scale_display+'/'+time_scale_slope+'</th><th></th></tr>';
+    html += '<tr><th style="width: 50px">#</th><th>Target Time in ' + time_scale_long + '</th><th>Target Temperature in °' + temp_scale_display + '</th><th>Slope in &deg;' + temp_scale_display + '/' + time_scale_slope + '</th><th></th></tr>';
 
-    for(var i=0; i<graph.profile.data.length;i++)
-    {
+    for (var i = 0; i < graph.profile.data.length; i++) {
 
-        if (i>=1) dps =  ((graph.profile.data[i][1]-graph.profile.data[i-1][1])/(graph.profile.data[i][0]-graph.profile.data[i-1][0]) * 10) / 10;
-        if (dps  > 0) { slope = "up";     color="rgba(206, 5, 5, 1)"; } else
-        if (dps  < 0) { slope = "down";   color="rgba(23, 108, 204, 1)"; dps *= -1; } else
-        if (dps == 0) { slope = "right";  color="grey"; }
+        if (i >= 1) dps = ((graph.profile.data[i][1] - graph.profile.data[i - 1][1]) / (graph.profile.data[i][0] - graph.profile.data[i - 1][0]) * 10) / 10;
+        if (dps > 0) { slope = "up"; color = "rgba(206, 5, 5, 1)"; } else
+            if (dps < 0) { slope = "down"; color = "rgba(23, 108, 204, 1)"; dps *= -1; } else
+                if (dps == 0) { slope = "right"; color = "grey"; }
 
-        html += '<tr><td><h4>' + (i+1) + '</h4></td>';
-        html += '<td><input type="text" class="form-control" id="profiletable-0-'+i+'" value="'+ timeProfileFormatter(graph.profile.data[i][0],true) + '" style="width: 60px" /></td>';
-        html += '<td><input type="text" class="form-control" id="profiletable-1-'+i+'" value="'+ graph.profile.data[i][1] + '" style="width: 60px" /></td>';
-        html += '<td><div class="input-group"><span class="glyphicon glyphicon-circle-arrow-' + slope + ' input-group-addon ds-trend" style="background: '+color+'"></span><input type="text" class="form-control ds-input" readonly value="' + formatDPS(dps) + '" style="width: 100px" /></div></td>';
+        html += '<tr><td><h4>' + (i + 1) + '</h4></td>';
+        html += '<td><input type="text" class="form-control" id="profiletable-0-' + i + '" value="' + timeProfileFormatter(graph.profile.data[i][0], true) + '" style="width: 60px" /></td>';
+        html += '<td><input type="text" class="form-control" id="profiletable-1-' + i + '" value="' + graph.profile.data[i][1] + '" style="width: 60px" /></td>';
+        html += '<td><div class="input-group"><span class="glyphicon glyphicon-circle-arrow-' + slope + ' input-group-addon ds-trend" style="background: ' + color + '"></span><input type="text" class="form-control ds-input" readonly value="' + formatDPS(dps) + '" style="width: 100px" /></div></td>';
         html += '<td>&nbsp;</td></tr>';
     }
 
@@ -131,37 +124,36 @@ function updateProfileTable()
     $('#profile_table').html(html);
 
     //Link table to graph
-    $(".form-control").change(function(e)
-        {
-            var id = $(this)[0].id; //e.currentTarget.attributes.id
-            var value = parseInt($(this)[0].value);
-            var fields = id.split("-");
-            var col = parseInt(fields[1]);
-            var row = parseInt(fields[2]);
+    $(".form-control").change(function (e) {
+        var id = $(this)[0].id; //e.currentTarget.attributes.id
+        var value = parseInt($(this)[0].value);
+        var fields = id.split("-");
+        var col = parseInt(fields[1]);
+        var row = parseInt(fields[2]);
 
-            if (graph.profile.data.length > 0) {
+        if (graph.profile.data.length > 0) {
             if (col == 0) {
-                graph.profile.data[row][col] = timeProfileFormatter(value,false);
+                graph.profile.data[row][col] = timeProfileFormatter(value, false);
             }
             else {
                 graph.profile.data[row][col] = value;
             }
 
-            graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
-            }
-            updateProfileTable();
+            graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
+        }
+        updateProfileTable();
 
-        });
+    });
 }
 
 function timeProfileFormatter(val, down) {
     var rval = val
-    switch(time_scale_profile){
+    switch (time_scale_profile) {
         case "m":
-            if (down) {rval = val / 60;} else {rval = val * 60;}
+            if (down) { rval = val / 60; } else { rval = val * 60; }
             break;
         case "h":
-            if (down) {rval = val / 3600;} else {rval = val * 3600;}
+            if (down) { rval = val / 3600; } else { rval = val * 3600; }
             break;
     }
     return Math.round(rval);
@@ -178,7 +170,7 @@ function formatDPS(val) {
     return Math.round(tval);
 }
 
-function hazardTemp(){
+function hazardTemp() {
 
     if (temp_scale == "f") {
         return (1500 * 9 / 5) + 32
@@ -188,27 +180,23 @@ function hazardTemp(){
     }
 }
 
-function timeTickFormatter(val)
-{
-    if (val < 1800)
-    {
+function timeTickFormatter(val) {
+    if (val < 1800) {
         return val;
     }
-    else
-    {
+    else {
         var hours = Math.floor(val / (3600));
         var div_min = val % (3600);
         var minutes = Math.floor(div_min / 60);
 
-        if (hours   < 10) {hours   = "0"+hours;}
-        if (minutes < 10) {minutes = "0"+minutes;}
+        if (hours < 10) { hours = "0" + hours; }
+        if (minutes < 10) { minutes = "0" + minutes; }
 
-        return hours+":"+minutes;
+        return hours + ":" + minutes;
     }
 }
 
-function runTask()
-{
+function runTask() {
     var cmd =
     {
         "cmd": "RUN",
@@ -216,14 +204,13 @@ function runTask()
     }
 
     graph.live.data = [];
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+    updateGraph();
 
     ws_control.send(JSON.stringify(cmd));
 
 }
 
-function runTaskSimulation()
-{
+function runTaskSimulation() {
     var cmd =
     {
         "cmd": "SIMULATE",
@@ -231,22 +218,20 @@ function runTaskSimulation()
     }
 
     graph.live.data = [];
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+    updateGraph();
 
     ws_control.send(JSON.stringify(cmd));
 
 }
 
 
-function abortTask()
-{
-    var cmd = {"cmd": "STOP"};
+function abortTask() {
+    var cmd = { "cmd": "STOP" };
     ws_control.send(JSON.stringify(cmd));
 }
 
-function enterNewMode()
-{
-    state="EDIT"
+function enterNewMode() {
+    state = "EDIT"
     $('#status').slideUp();
     $('#edit').show();
     $('#profile_selector').hide();
@@ -256,13 +241,12 @@ function enterNewMode()
     graph.profile.points.show = true;
     graph.profile.draggable = true;
     graph.profile.data = [];
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
     updateProfileTable();
 }
 
-function enterEditMode()
-{
-    state="EDIT"
+function enterEditMode() {
+    state = "EDIT"
     $('#status').slideUp();
     $('#edit').show();
     $('#profile_selector').hide();
@@ -271,15 +255,14 @@ function enterEditMode()
     $('#form_profile_name').val(profiles[selected_profile].name);
     graph.profile.points.show = true;
     graph.profile.draggable = true;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
     updateProfileTable();
 }
 
-function leaveEditMode()
-{
+function leaveEditMode() {
     selected_profile_name = $('#form_profile_name').val();
     ws_storage.send('GET');
-    state="IDLE";
+    state = "IDLE";
     $('#edit').hide();
     $('#profile_selector').show();
     $('#btn_controls').show();
@@ -287,70 +270,59 @@ function leaveEditMode()
     $('#profile_table').slideUp();
     graph.profile.points.show = false;
     graph.profile.draggable = false;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
 }
 
-function newPoint()
-{
-    if(graph.profile.data.length > 0)
-    {
-        var pointx = parseInt(graph.profile.data[graph.profile.data.length-1][0])+15;
+function newPoint() {
+    if (graph.profile.data.length > 0) {
+        var pointx = parseInt(graph.profile.data[graph.profile.data.length - 1][0]) + 15;
     }
-    else
-    {
+    else {
         var pointx = 0;
     }
-    graph.profile.data.push([pointx, Math.floor((Math.random()*230)+25)]);
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    graph.profile.data.push([pointx, Math.floor((Math.random() * 230) + 25)]);
+    graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
     updateProfileTable();
 }
 
-function delPoint()
-{
-    graph.profile.data.splice(-1,1)
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+function delPoint() {
+    graph.profile.data.splice(-1, 1)
+    graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
     updateProfileTable();
 }
 
-function toggleTable()
-{
-    if($('#profile_table').css('display') == 'none')
-    {
+function toggleTable() {
+    if ($('#profile_table').css('display') == 'none') {
         $('#profile_table').slideDown();
     }
-    else
-    {
+    else {
         $('#profile_table').slideUp();
     }
 }
 
-function saveProfile()
-{
+function saveProfile() {
     name = $('#form_profile_name').val();
     var rawdata = graph.plot.getData()[0].data
     var data = [];
     var last = -1;
 
-    for(var i=0; i<rawdata.length;i++)
-    {
-        if(rawdata[i][0] > last)
-        {
-          data.push([rawdata[i][0], rawdata[i][1]]);
+    for (var i = 0; i < rawdata.length; i++) {
+        if (rawdata[i][0] > last) {
+            data.push([rawdata[i][0], rawdata[i][1]]);
         }
-        else
-        {
-          $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR 88:</b><br/>An oven is not a time-machine", {
-            ele: 'body', // which element to append to
-            type: 'alert', // (null, 'info', 'error', 'success')
-            offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-            align: 'center', // ('left', 'right', or 'center')
-            width: 385, // (integer, or 'auto')
-            delay: 5000,
-            allow_dismiss: true,
-            stackup_spacing: 10 // spacing between consecutively stacked growls.
-          });
+        else {
+            $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR 88:</b><br/>An oven is not a time-machine", {
+                ele: 'body', // which element to append to
+                type: 'alert', // (null, 'info', 'error', 'success')
+                offset: { from: 'top', amount: 250 }, // 'top', or 'bottom'
+                align: 'center', // ('left', 'right', or 'center')
+                width: 385, // (integer, or 'auto')
+                delay: 5000,
+                allow_dismiss: true,
+                stackup_spacing: 10 // spacing between consecutively stacked growls.
+            });
 
-          return false;
+            return false;
         }
 
         last = rawdata[i][0];
@@ -366,204 +338,194 @@ function saveProfile()
     leaveEditMode();
 }
 
-function getOptions()
-{
+function getOptions() {
 
-  var options =
-  {
-
-    series:
+    var options =
     {
-        lines:
+
+        series:
         {
-            show: true
+            lines:
+            {
+                show: true
+            },
+
+            points:
+            {
+                show: true,
+                radius: 5,
+                symbol: "circle"
+            },
+
+            shadowSize: 3
+
         },
 
-        points:
+        xaxis:
         {
-            show: true,
-            radius: 5,
-            symbol: "circle"
+            min: 0,
+            tickColor: 'rgba(216, 211, 197, 0.2)',
+            tickFormatter: timeTickFormatter,
+            font:
+            {
+                size: 14,
+                lineHeight: 14, weight: "normal",
+                family: "Digi",
+                variant: "small-caps",
+                color: "rgba(216, 211, 197, 0.85)"
+            }
         },
 
-        shadowSize: 3
+        yaxis:
+        {
+            min: 0,
+            tickDecimals: 0,
+            draggable: false,
+            tickColor: 'rgba(216, 211, 197, 0.2)',
+            font:
+            {
+                size: 14,
+                lineHeight: 14,
+                weight: "normal",
+                family: "Digi",
+                variant: "small-caps",
+                color: "rgba(216, 211, 197, 0.85)"
+            }
+        },
 
-    },
+        grid:
+        {
+            color: 'rgba(216, 211, 197, 0.55)',
+            borderWidth: 1,
+            labelMargin: 10,
+            mouseActiveRadius: 50
+        },
 
-	xaxis:
-    {
-      min: 0,
-      tickColor: 'rgba(216, 211, 197, 0.2)',
-      tickFormatter: timeTickFormatter,
-      font:
-      {
-        size: 14,
-        lineHeight: 14,        weight: "normal",
-        family: "Digi",
-        variant: "small-caps",
-        color: "rgba(216, 211, 197, 0.85)"
-      }
-	},
-
-	yaxis:
-    {
-      min: 0,
-      tickDecimals: 0,
-      draggable: false,
-      tickColor: 'rgba(216, 211, 197, 0.2)',
-      font:
-      {
-        size: 14,
-        lineHeight: 14,
-        weight: "normal",
-        family: "Digi",
-        variant: "small-caps",
-        color: "rgba(216, 211, 197, 0.85)"
-      }
-	},
-
-	grid:
-    {
-	  color: 'rgba(216, 211, 197, 0.55)',
-      borderWidth: 1,
-      labelMargin: 10,
-      mouseActiveRadius: 50
-	},
-
-    legend:
-    {
-      show: false
+        legend:
+        {
+            show: false
+        }
     }
-  }
 
-  return options;
+    return options;
 
+}
+function updateGraph() {
+    graph.plot = $.plot("#graph_container", [graph.profile, graph.live], getOptions());
 }
 
 
 
-$(document).ready(function()
-{
+$(document).ready(function () {
 
-    if(!("WebSocket" in window))
-    {
+
+    if (!("WebSocket" in window)) {
         $('#chatLog, input, button, #examples').fadeOut("fast");
         $('<p>Oh no, you need a browser that supports WebSockets. How about <a href="http://www.google.com/chrome">Google Chrome</a>?</p>').appendTo('#container');
     }
-    else
-    {
+    else {
 
         // Status Socket ////////////////////////////////
 
-        ws_status.onopen = function()
-        {
+        ws_status.onopen = function () {
             console.log("Status Socket has been opened");
 
             $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span>Getting data from server",
-            {
-            ele: 'body', // which element to append to
-            type: 'success', // (null, 'info', 'error', 'success')
-            offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-            align: 'center', // ('left', 'right', or 'center')
-            width: 385, // (integer, or 'auto')
-            delay: 2500,
-            allow_dismiss: true,
-            stackup_spacing: 10 // spacing between consecutively stacked growls.
+                {
+                    ele: 'body', // which element to append to
+                    type: 'success', // (null, 'info', 'error', 'success')
+                    offset: { from: 'top', amount: 250 }, // 'top', or 'bottom'
+                    align: 'center', // ('left', 'right', or 'center')
+                    width: 385, // (integer, or 'auto')
+                    delay: 2500,
+                    allow_dismiss: true,
+                    stackup_spacing: 10 // spacing between consecutively stacked growls.
+                });
+        };
+
+        ws_status.onclose = function () {
+            $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR 1:</b><br/>Status Websocket not available", {
+                ele: 'body', // which element to append to
+                type: 'error', // (null, 'info', 'error', 'success')
+                offset: { from: 'top', amount: 250 }, // 'top', or 'bottom'
+                align: 'center', // ('left', 'right', or 'center')
+                width: 385, // (integer, or 'auto')
+                delay: 5000,
+                allow_dismiss: true,
+                stackup_spacing: 10 // spacing between consecutively stacked growls.
             });
         };
 
-        ws_status.onclose = function()
-        {
-            $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR 1:</b><br/>Status Websocket not available", {
-            ele: 'body', // which element to append to
-            type: 'error', // (null, 'info', 'error', 'success')
-            offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-            align: 'center', // ('left', 'right', or 'center')
-            width: 385, // (integer, or 'auto')
-            delay: 5000,
-            allow_dismiss: true,
-            stackup_spacing: 10 // spacing between consecutively stacked growls.
-          });
-        };
-
-        ws_status.onmessage = function(e)
-        {
+        ws_status.onmessage = function (e) {
             console.log("received status data")
             console.log(e.data);
 
             x = JSON.parse(e.data);
-            if (x.type == "backlog")
-            {
-                if (x.profile)
-                {
+            if (x.type == "backlog") {
+                if (x.profile) {
                     selected_profile_name = x.profile.name;
-                    $.each(profiles,  function(i,v) {
-                        if(v.name == x.profile.name) {
+                    $.each(profiles, function (i, v) {
+                        if (v.name == x.profile.name) {
                             updateProfile(i);
                             $('#e2').select2('val', i);
                         }
                     });
                 }
 
-                $.each(x.log, function(i,v) {
+                $.each(x.log, function (i, v) {
                     graph.live.data.push([v.runtime, v.temperature]);
-                    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
                 });
+                updateGraph();
             }
 
-            if(state!="EDIT")
-            {
+            if (state != "EDIT") {
                 state = x.state;
 
-                if (state!=state_last)
-                {
-                    if(state_last == "RUNNING")
-                    {
+                if (state != state_last) {
+                    if (state_last == "RUNNING") {
                         $('#target_temp').html('---');
                         updateProgress(0);
                         $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>Run completed</b>", {
-                        ele: 'body', // which element to append to
-                        type: 'success', // (null, 'info', 'error', 'success')
-                        offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-                        align: 'center', // ('left', 'right', or 'center')
-                        width: 385, // (integer, or 'auto')
-                        delay: 0,
-                        allow_dismiss: true,
-                        stackup_spacing: 10 // spacing between consecutively stacked growls.
+                            ele: 'body', // which element to append to
+                            type: 'success', // (null, 'info', 'error', 'success')
+                            offset: { from: 'top', amount: 250 }, // 'top', or 'bottom'
+                            align: 'center', // ('left', 'right', or 'center')
+                            width: 385, // (integer, or 'auto')
+                            delay: 0,
+                            allow_dismiss: true,
+                            stackup_spacing: 10 // spacing between consecutively stacked growls.
                         });
                     }
                 }
 
-                if(state=="RUNNING")
-                {
+                if (state == "RUNNING") {
                     $("#nav_start").hide();
                     $("#nav_stop").show();
 
                     graph.live.data.push([x.runtime, x.temperature]);
-                    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+                    updateGraph();
 
-                    left = parseInt(x.totaltime-x.runtime);
+                    left = parseInt(x.totaltime - x.runtime);
                     eta = new Date(left * 1000).toISOString().substr(11, 8);
 
-                    updateProgress(parseFloat(x.runtime)/parseFloat(x.totaltime)*100);
+                    updateProgress(parseFloat(x.runtime) / parseFloat(x.totaltime) * 100);
                     $('#state').html('<span class="glyphicon glyphicon-time" style="font-size: 22px; font-weight: normal"></span><span style="font-family: Digi; font-size: 40px;">' + eta + '</span>');
                     $('#target_temp').html(parseInt(x.target));
 
 
                 }
-                else
-                {
+                else {
                     $("#nav_start").show();
                     $("#nav_stop").hide();
-                    $('#state').html('<p class="ds-text">'+state+'</p>');
+                    $('#state').html('<p class="ds-text">' + state + '</p>');
                 }
 
                 $('#act_temp').html(parseInt(x.temperature));
 
-		if (x.heat > 0.0) {
-	            setTimeout(function() { $('#heat').addClass("ds-led-heat-active") }, 0 )
-	            setTimeout(function() { $('#heat').removeClass("ds-led-heat-active") }, (x.heat*1000.0)-5)
-                    }
+                if (x.heat > 0.0) {
+                    setTimeout(function () { $('#heat').addClass("ds-led-heat-active") }, 0)
+                    setTimeout(function () { $('#heat').removeClass("ds-led-heat-active") }, (x.heat * 1000.0) - 5)
+                }
                 if (x.cool > 0.5) { $('#cool').addClass("ds-led-cool-active"); } else { $('#cool').removeClass("ds-led-cool-active"); }
                 if (x.air > 0.5) { $('#air').addClass("ds-led-air-active"); } else { $('#air').removeClass("ds-led-air-active"); }
                 if (x.temperature > hazardTemp()) { $('#hazard').addClass("ds-led-hazard-active"); } else { $('#hazard').removeClass("ds-led-hazard-active"); }
@@ -576,14 +538,12 @@ $(document).ready(function()
 
         // Config Socket /////////////////////////////////
 
-        ws_config.onopen = function()
-        {
+        ws_config.onopen = function () {
             ws_config.send('GET');
         };
 
-        ws_config.onmessage = function(e)
-        {
-            console.log (e.data);
+        ws_config.onmessage = function (e) {
+            console.log(e.data);
             x = JSON.parse(e.data);
             temp_scale = x.temp_scale;
             time_scale_slope = x.time_scale_slope;
@@ -591,13 +551,13 @@ $(document).ready(function()
             kwh_rate = x.kwh_rate;
             currency_type = x.currency_type;
 
-            if (temp_scale == "c") {temp_scale_display = "C";} else {temp_scale_display = "F";}
+            if (temp_scale == "c") { temp_scale_display = "C"; } else { temp_scale_display = "F"; }
 
 
-            $('#act_temp_scale').html('º'+temp_scale_display);
-            $('#target_temp_scale').html('º'+temp_scale_display);
+            $('#act_temp_scale').html('º' + temp_scale_display);
+            $('#target_temp_scale').html('º' + temp_scale_display);
 
-            switch(time_scale_profile){
+            switch (time_scale_profile) {
                 case "s":
                     time_scale_long = "Seconds";
                     break;
@@ -613,46 +573,38 @@ $(document).ready(function()
 
         // Control Socket ////////////////////////////////
 
-        ws_control.onopen = function()
-        {
+        ws_control.onopen = function () {
 
         };
 
-        ws_control.onmessage = function(e)
-        {
+        ws_control.onmessage = function (e) {
             //Data from Simulation
-            console.log ("control socket has been opened")
-            console.log (e.data);
+            console.log("control socket has been opened")
+            console.log(e.data);
             x = JSON.parse(e.data);
             graph.live.data.push([x.runtime, x.temperature]);
-            graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+            updateGraph();
 
         }
 
         // Storage Socket ///////////////////////////////
 
-        ws_storage.onopen = function()
-        {
+        ws_storage.onopen = function () {
             ws_storage.send('GET');
         };
 
 
-        ws_storage.onmessage = function(e)
-        {
+        ws_storage.onmessage = function (e) {
             message = JSON.parse(e.data);
 
-            if(message.resp)
-            {
-                if(message.resp == "FAIL")
-                {
-                    if (confirm('Overwrite?'))
-                    {
-                        message.force=true;
+            if (message.resp) {
+                if (message.resp == "FAIL") {
+                    if (confirm('Overwrite?')) {
+                        message.force = true;
                         console.log("Sending: " + JSON.stringify(message));
                         ws_storage.send(JSON.stringify(message));
                     }
-                    else
-                    {
+                    else {
                         //do nothing
                     }
                 }
@@ -667,24 +619,22 @@ $(document).ready(function()
             $('#e2').find('option').remove().end();
             // check if current selected value is a valid profile name
             // if not, update with first available profile name
-            var valid_profile_names = profiles.map(function(a) {return a.name;});
+            var valid_profile_names = profiles.map(function (a) { return a.name; });
             if (
-              valid_profile_names.length > 0 &&
-              $.inArray(selected_profile_name, valid_profile_names) === -1
+                valid_profile_names.length > 0 &&
+                $.inArray(selected_profile_name, valid_profile_names) === -1
             ) {
-              selected_profile = 0;
-              selected_profile_name = valid_profile_names[0];
+                selected_profile = 0;
+                selected_profile_name = valid_profile_names[0];
             }
 
             // fill select with new options from websocket
-            for (var i=0; i<profiles.length; i++)
-            {
+            for (var i = 0; i < profiles.length; i++) {
                 var profile = profiles[i];
                 //console.log(profile.name);
-                $('#e2').append('<option value="'+i+'">'+profile.name+'</option>');
+                $('#e2').append('<option value="' + i + '">' + profile.name + '</option>');
 
-                if (profile.name == selected_profile_name)
-                {
+                if (profile.name == selected_profile_name) {
                     selected_profile = i;
                     $('#e2').select2('val', i);
                     updateProfile(i);
@@ -694,15 +644,14 @@ $(document).ready(function()
 
 
         $("#e2").select2(
-        {
-            placeholder: "Select Profile",
-            allowClear: true,
-            minimumResultsForSearch: -1
-        });
+            {
+                placeholder: "Select Profile",
+                allowClear: true,
+                minimumResultsForSearch: -1
+            });
 
 
-        $("#e2").on("change", function(e)
-        {
+        $("#e2").on("change", function (e) {
             updateProfile(e.val);
         });
 
