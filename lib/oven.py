@@ -34,16 +34,15 @@ class Oven(threading.Thread):
             if config.simulate:
                 zone = SimulatedZone(
                     zc,
-                    config.simulate,
                     config.sensor_time_wait,
-                    config.temp_scale
                 )
             else:
                 zone = Zone(
                     zc,
-                    config.simulate,
                     config.sensor_time_wait,
-                    config.temp_scale
+                    config.temp_scale,
+                    config.honour_theromocouple_short_errors,
+                    config.temperature_average_samples
                 )
 
             self.zones.append(zone)

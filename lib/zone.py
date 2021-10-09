@@ -1,4 +1,5 @@
 from enum import Enum
+from lib.output import Output
 import threading
 import time
 from lib.zoneConfig import ZoneConfig
@@ -13,13 +14,19 @@ class Zone:
     def __init__(
             self,
             zc: ZoneConfig,
-            simulate: bool,
             sensor_time_wait: int,
             temp_scale: str,
+            honour_theromocouple_short_errors: bool,
+            temperature_average_samples: int
     ) -> None:
 
         threading.Thread.__init__(self)
-        self.temp_sensor = TempSensorReal(zc, sensor_time_wait, temp_scale)
+        self.temp_sensor = TempSensorReal(
+            zc, sensor_time_wait, temp_scale,
+            honour_theromocouple_short_errors,
+            temperature_average_samples
+        )
+        self.temp_sensor.start()
 
         self.time_step = sensor_time_wait
         self.thermocouple_offset = zc.thermocouple_offset
@@ -27,6 +34,7 @@ class Zone:
         self.zone_index = len(Zone.stats)
         Zone.stats.append(self.getStats())
         self.heat = 0
+        self.output = Output(zc.gpio_heat)
 
     def __repr__(self) -> str:
         return "{Name}: {Temp}° ({Delta}) <{Heat_pct}%>".format(**self.getStats())
@@ -64,14 +72,19 @@ class Zone:
 
     def heat_for(self, heat_on):
         self.heat = heat_on
-        raise Exception("Not implemented")
+        self.output.heat(heat_on)
 
     def reset(self):
         self.heat = 0
+        self.output.off()
 
 
 class SimulatedZone(Zone):
-    def __init__(self, zc: ZoneConfig, simulate: bool, sensor_time_wait: int, temp_scale: str, zone_max_lag: int = 10) -> None:
+    def __init__(
+        self,
+        zc: ZoneConfig,
+        sensor_time_wait: int,
+    ) -> None:
         threading.Thread.__init__(self)
         self.heat = 0
         self.temp_sensor = TempSensorSimulated(sensor_time_wait)

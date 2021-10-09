@@ -28,13 +28,15 @@ class TempSensorReal(TempSensor):
     '''real temperature sensor thread that takes N measurements
        during the time_step'''
 
-    def __init__(self, zc: ZoneConfig, sensor_time_wait: int, temp_scale: str):
+    def __init__(self, zc: ZoneConfig, sensor_time_wait: int, temp_scale: str, honour_theromocouple_short_errors: bool, temperature_average_samples: int):
         TempSensor.__init__(self, sensor_time_wait)
         self.sleeptime = self.time_step / \
             float(zc.temperature_average_samples)
         self.bad_count = 0
         self.ok_count = 0
         self.bad_stamp = 0
+        self.honour_theromocouple_short_errors = honour_theromocouple_short_errors
+        self.temperature_average_samples = temperature_average_samples
 
         if zc.board is BoardModel.MAX31855:
             log.info("init MAX31855")
@@ -48,7 +50,7 @@ class TempSensorReal(TempSensor):
             log.info("init MAX31856")
             from max31856 import MAX31856
 
-            self.thermocouple = MAX31856(tc_type=config.thermocouple_type,
+            self.thermocouple = MAX31856(tc_type=zc.thermocouple_type,
                                          software_spi=zc.pins.asDict(),
                                          units=temp_scale,
                                          ac_freq_50hz=zc.ac_freq_50hz,
@@ -78,12 +80,12 @@ class TempSensorReal(TempSensor):
             self.unknownError = self.thermocouple.unknownError
 
             is_bad_value = self.noConnection | self.unknownError
-            if config.honour_theromocouple_short_errors:
+            if self.honour_theromocouple_short_errors:
                 is_bad_value |= self.shortToGround | self.shortToVCC
 
             if not is_bad_value:
                 temps.append(temp)
-                if len(temps) > config.temperature_average_samples:
+                if len(temps) > self.temperature_average_samples:
                     del temps[0]
                 self.ok_count += 1
 

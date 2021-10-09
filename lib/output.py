@@ -1,3 +1,8 @@
+import logging
+import time
+
+log = logging.getLogger(__name__)
+
 
 class Output(object):
     def __init__(self, gpio_heat):
@@ -27,8 +32,7 @@ class Output(object):
         if tuning:
             return
         time.sleep(sleepfor)
+        self.off()
 
-    def cool(self, sleepfor):
-        '''no active cooling, so sleep'''
+    def off(self):
         self.GPIO.output(self.gpio_heat, self.GPIO.LOW)
-        time.sleep(sleepfor)
