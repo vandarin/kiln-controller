@@ -9,3 +9,4 @@ thumbs.db
 #config.py
 .idea/*
 config.py
+venv

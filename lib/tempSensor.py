@@ -28,7 +28,7 @@ class TempSensorReal(TempSensor):
     '''real temperature sensor thread that takes N measurements
        during the time_step'''
 
-    def __init__(self, zc: ZoneConfig, sensor_time_wait: int, temp_scale: str, honour_theromocouple_short_errors: bool, temperature_average_samples: int):
+    def __init__(self, zc: ZoneConfig, sensor_time_wait: int, temp_scale: str, honour_theromocouple_short_errors: bool):
         TempSensor.__init__(self, sensor_time_wait)
         self.sleeptime = self.time_step / \
             float(zc.temperature_average_samples)
@@ -36,7 +36,7 @@ class TempSensorReal(TempSensor):
         self.ok_count = 0
         self.bad_stamp = 0
         self.honour_theromocouple_short_errors = honour_theromocouple_short_errors
-        self.temperature_average_samples = temperature_average_samples
+        self.temperature_average_samples = zc.temperature_average_samples
 
         if zc.board is BoardModel.MAX31855:
             log.info("init MAX31855")
@@ -48,15 +48,18 @@ class TempSensorReal(TempSensor):
 
         elif zc.board is BoardModel.MAX31856:
             log.info("init MAX31856")
-            from max31856 import MAX31856
+            from lib.max31856 import MAX31856
 
-            self.thermocouple = MAX31856(tc_type=zc.thermocouple_type,
+            self.thermocouple = MAX31856(tc_type=zc.MAX31856_type,
                                          software_spi=zc.pins.asDict(),
                                          units=temp_scale,
                                          ac_freq_50hz=zc.ac_freq_50hz,
                                          )
         else:
             raise NotImplementedError("Unknown Board Type")
+
+def __repr__(self) -> str:
+    return "T: %0.2f%s" % (self.temp)
 
     def run(self):
         '''use a moving average of config.temperature_average_samples across the time_step'''

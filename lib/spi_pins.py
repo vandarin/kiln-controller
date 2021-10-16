@@ -1,15 +1,14 @@
 class SPI_Pins:
-    def __init__(self, cs, clock, data, di=None) -> None:
-        self.cs = cs
+    def __init__(self, clock, MISO, MOSI=None) -> None:
         self.clock = clock
-        self.data = data
-        self.di = di
+        self.MISO = MISO
+        self.MOSI = MOSI
 
     def asList(self):
-        return [self.cs, self.clock, self.data, self.di]
+        return [self.clock, self.MISO, self.MOSI]
 
     def asDict(self):
-        return {'cs': self.cs,
-                'clk': self.clock,
-                'do': self.data,
-                'di': self.di}
+        return {
+            'clock': self.clock,
+            'MISO': self.MISO,
+            'MOSI': self.MOSI}

@@ -1,341 +1,347 @@
+# SPDX-FileCopyrightText: 2018 Bryan Siepert for Adafruit Industries
+#
+# SPDX-License-Identifier: MIT
+
 """
-max31856.py
+`MAX31856`
+====================================================
 
-Class which defines interaction with the MAX31856 sensor.
+Forked 2021/10/16 Lane Roberts
 
-Copyright (c) 2019 John Robinson
-Author: John Robinson
+CircuitPython module for the MAX31856 Universal Thermocouple Amplifier. See
+examples/simpletest.py for an example of the usage.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+* Author(s): Bryan Siepert
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
+Implementation Notes
+--------------------
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
+**Hardware:**
+
+* Adafruit `Universal Thermocouple Amplifier MAX31856 Breakout
+  <https://www.adafruit.com/product/3263>`_ (Product ID: 3263)
+
+**Software and Dependencies:**
+
+* Adafruit CircuitPython firmware for the supported boards:
+  https://circuitpython.org/downloads
+
+* Adafruit's Bus Device library: https://github.com/adafruit/Adafruit_CircuitPython_BusDevice
+
 """
-import logging
-import warnings
 
-import Adafruit_GPIO as Adafruit_GPIO
-import Adafruit_GPIO.SPI as SPI
+from time import sleep
+from micropython import const
+from adafruit_bus_device.spi_device import SPIDevice
+
+try:
+    from struct import unpack
+except ImportError:
+    from ustruct import unpack
+
+__version__ = "0.0.0-auto.0"
+__repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_MAX31856.git"
+
+# Register constants
+_MAX31856_CR0_REG = const(0x00)
+_MAX31856_CR0_AUTOCONVERT = const(0x80)
+_MAX31856_CR0_1SHOT = const(0x40)
+_MAX31856_CR0_OCFAULT1 = const(0x20)
+_MAX31856_CR0_OCFAULT0 = const(0x10)
+_MAX31856_CR0_CJ = const(0x08)
+_MAX31856_CR0_FAULT = const(0x04)
+_MAX31856_CR0_FAULTCLR = const(0x02)
+
+_MAX31856_CR1_REG = const(0x01)
+_MAX31856_MASK_REG = const(0x02)
+_MAX31856_CJHF_REG = const(0x03)
+_MAX31856_CJLF_REG = const(0x04)
+_MAX31856_LTHFTH_REG = const(0x05)
+_MAX31856_LTHFTL_REG = const(0x06)
+_MAX31856_LTLFTH_REG = const(0x07)
+_MAX31856_LTLFTL_REG = const(0x08)
+_MAX31856_CJTO_REG = const(0x09)
+_MAX31856_CJTH_REG = const(0x0A)
+_MAX31856_CJTL_REG = const(0x0B)
+_MAX31856_LTCBH_REG = const(0x0C)
+_MAX31856_LTCBM_REG = const(0x0D)
+_MAX31856_LTCBL_REG = const(0x0E)
+_MAX31856_SR_REG = const(0x0F)
+
+# fault types
+_MAX31856_FAULT_CJRANGE = const(0x80)
+_MAX31856_FAULT_TCRANGE = const(0x40)
+_MAX31856_FAULT_CJHIGH = const(0x20)
+_MAX31856_FAULT_CJLOW = const(0x10)
+_MAX31856_FAULT_TCHIGH = const(0x08)
+_MAX31856_FAULT_TCLOW = const(0x04)
+_MAX31856_FAULT_OVUV = const(0x02)
+_MAX31856_FAULT_OPEN = const(0x01)
 
 
-class MAX31856(object):
-    """Class to represent an Adafruit MAX31856 thermocouple temperature
-    measurement board.
+class SampleType:  # pylint: disable=too-few-public-methods
+    # pylint: disable=invalid-name
+    AVG_SEL_1SAMP = const(0x00)
+    AVG_SEL_2SAMP = const(0x10)
+    AVG_SEL_4SAMP = const(0x20)
+    AVG_SEL_8SAMP = const(0x30)
+    AVG_SEL_16SAMP = const(0x40)
+
+
+class ThermocoupleType:  # pylint: disable=too-few-public-methods
+    """An enum-like class representing the different types of thermocouples that the MAX31856 can
+    use. The values can be referenced like ``ThermocoupleType.K`` or ``ThermocoupleType.S``
+    Possible values are
+
+    - ``ThermocoupleType.B``
+    - ``ThermocoupleType.E``
+    - ``ThermocoupleType.J``
+    - ``ThermocoupleType.K``
+    - ``ThermocoupleType.N``
+    - ``ThermocoupleType.R``
+    - ``ThermocoupleType.S``
+    - ``ThermocoupleType.T``
+
     """
 
-    # Board Specific Constants
-    MAX31856_CONST_THERM_LSB = 2**-7
-    MAX31856_CONST_THERM_BITS = 19
-    MAX31856_CONST_CJ_LSB = 2**-6
-    MAX31856_CONST_CJ_BITS = 14
+    # pylint: disable=invalid-name
+    B = 0b0000
+    E = 0b0001
+    J = 0b0010
+    K = 0b0011
+    N = 0b0100
+    R = 0b0101
+    S = 0b0110
+    T = 0b0111
+    G8 = 0b1000
+    G32 = 0b1100
 
-    ### Register constants, see data sheet Table 6 (in Rev. 0) for info.
-    # Read Addresses
-    MAX31856_REG_READ_CR0 = 0x00
-    MAX31856_REG_READ_CR1 = 0x01
-    MAX31856_REG_READ_MASK = 0x02
-    MAX31856_REG_READ_CJHF = 0x03
-    MAX31856_REG_READ_CJLF = 0x04
-    MAX31856_REG_READ_LTHFTH = 0x05
-    MAX31856_REG_READ_LTHFTL = 0x06
-    MAX31856_REG_READ_LTLFTH = 0x07
-    MAX31856_REG_READ_LTLFTL = 0x08
-    MAX31856_REG_READ_CJTO = 0x09
-    MAX31856_REG_READ_CJTH = 0x0A  # Cold-Junction Temperature Register, MSB
-    MAX31856_REG_READ_CJTL = 0x0B  # Cold-Junction Temperature Register, LSB
-    MAX31856_REG_READ_LTCBH = 0x0C # Linearized TC Temperature, Byte 2
-    MAX31856_REG_READ_LTCBM = 0x0D # Linearized TC Temperature, Byte 1
-    MAX31856_REG_READ_LTCBL = 0x0E # Linearized TC Temperature, Byte 0
-    MAX31856_REG_READ_FAULT = 0x0F # Fault status register
 
-    # Write Addresses
-    MAX31856_REG_WRITE_CR0 = 0x80
-    MAX31856_REG_WRITE_CR1 = 0x81
-    MAX31856_REG_WRITE_MASK = 0x82
-    MAX31856_REG_WRITE_CJHF = 0x83
-    MAX31856_REG_WRITE_CJLF = 0x84
-    MAX31856_REG_WRITE_LTHFTH = 0x85
-    MAX31856_REG_WRITE_LTHFTL = 0x86
-    MAX31856_REG_WRITE_LTLFTH = 0x87
-    MAX31856_REG_WRITE_LTLFTL = 0x88
-    MAX31856_REG_WRITE_CJTO = 0x89
-    MAX31856_REG_WRITE_CJTH = 0x8A  # Cold-Junction Temperature Register, MSB
-    MAX31856_REG_WRITE_CJTL = 0x8B  # Cold-Junction Temperature Register, LSB
+class MAX31856:
+    """Driver for the MAX31856 Universal Thermocouple Amplifier
 
-    # Pre-config Register Options
-    MAX31856_CR0_READ_ONE = 0x40 # One shot reading, delay approx. 200ms then read temp registers
-    MAX31856_CR0_READ_CONT = 0x80 # Continuous reading, delay approx. 100ms between readings
+    :param ~busio.SPI spi: The SPI bus the MAX31856 is connected to.
+    :param ~microcontroller.Pin cs: The pin used for the CS signal.
+    :param ~adafruit_max31856.ThermocoupleType thermocouple_type: The type of thermocouple.\
+      Default is Type K.
 
-    # Thermocouple Types
-    MAX31856_B_TYPE = 0x0 # Read B Type Thermocouple
-    MAX31856_E_TYPE = 0x1 # Read E Type Thermocouple
-    MAX31856_J_TYPE = 0x2 # Read J Type Thermocouple
-    MAX31856_K_TYPE = 0x3 # Read K Type Thermocouple
-    MAX31856_N_TYPE = 0x4 # Read N Type Thermocouple
-    MAX31856_R_TYPE = 0x5 # Read R Type Thermocouple
-    MAX31856_S_TYPE = 0x6 # Read S Type Thermocouple
-    MAX31856_T_TYPE = 0x7 # Read T Type Thermocouple
+    **Quickstart: Importing and using the MAX31856**
 
-    def __init__(self, tc_type=MAX31856_S_TYPE, units="c", avgsel=0x0, ac_freq_50hz=False, ocdetect=0x1, software_spi=None, hardware_spi=None, gpio=None):
+        Here is an example of using the :class:`MAX31856` class.
+        First you will need to import the libraries to use the sensor
+
+        .. code-block:: python
+
+            import board
+            from digitalio import DigitalInOut, Direction
+            import adafruit_max31856
+
+        Once this is done you can define your `board.SPI` object and define your sensor object
+
+        .. code-block:: python
+
+            spi = board.SPI()
+            cs = digitalio.DigitalInOut(board.D5)  # Chip select of the MAX31856 board.
+            sensor = adafruit_max31856.MAX31856(spi, cs)
+
+
+        Now you have access to the :attr:`temperature` attribute
+
+        .. code-block:: python
+
+            temperature = sensor.temperature
+
+    """
+
+    def __init__(self, spi, cs, thermocouple_type=ThermocoupleType.K, continuous=False, samples=SampleType.AVG_SEL_1SAMP):
+        self._device = SPIDevice(spi, cs, baudrate=100000, polarity=0, phase=1)
+        self._continuous = continuous
+
+        # assert on any fault
+        self._write_u8(_MAX31856_MASK_REG, 0x0)
         """
-        Initialize MAX31856 device with software SPI on the specified CLK,
-        CS, and DO pins.  Alternatively can specify hardware SPI by sending an
-        SPI.SpiDev device in the spi parameter.
-
-        Args:
-            tc_type (1-byte Hex): Type of Thermocouple.  Choose from class variables of the form
-                MAX31856.MAX31856_X_TYPE.
-            avgsel (1-byte Hex): Type of Averaging.  Choose from values in CR0 table of datasheet.
-                Default is single sample.
-            ac_freq_50hz: Set to True if your AC frequency is 50Hz, Set to False for 60Hz,
-            ocdetect: Detect open circuit errors (ie broken thermocouple). Choose from values in CR1 table of datasheet
-            software_spi (dict): Contains the pin assignments for software SPI, as defined below:
-                clk (integer): Pin number for software SPI clk
-                cs (integer): Pin number for software SPI cs
-                do (integer): Pin number for software SPI MISO
-                di (integer): Pin number for software SPI MOSI
-            hardware_spi (SPI.SpiDev): If using hardware SPI, define the connection
-        """
-        self._logger = logging.getLogger('Adafruit_MAX31856.MAX31856')
-        self._spi = None
-        self.tc_type = tc_type
-        self.avgsel = avgsel
-        self.units = units
-        self.noConnection = self.shortToGround = self.shortToVCC = self.unknownError = False
-
-        # Handle hardware SPI
-        if hardware_spi is not None:
-            self._logger.debug('Using hardware SPI')
-            self._spi = hardware_spi
-        elif software_spi is not None:
-            self._logger.debug('Using software SPI')
-            # Default to platform GPIO if not provided.
-            if gpio is None:
-                gpio = Adafruit_GPIO.get_platform_gpio()
-            self._spi = SPI.BitBang(gpio, software_spi['clk'], software_spi['di'],
-                                                  software_spi['do'], software_spi['cs'])
+        # Set CR0 config
+        CRO, 00h/80h:[7] cmode (0=off (default), 1=auto conv mode)
+		[6] 1shot (0=off, default)
+		[5:4] OCFAULT (table 4 in datasheet)
+		[3] CJ disable (0=cold junction enabled by default, 1=CJ disabled, used to write CJ temp)
+		[2] FAULT mode (0=sets, clears automatically, 1=manually cleared, sets automatically)
+		[1] FAULTCLR   (0 - default, 1=see datasheet)
+		[0] 50/60Hz (0=60hz (default), 1=50Hz filtering) + harmonics */"""
+        cr0_config = 0
+        if(self._continuous):
+            cr0_config = (_MAX31856_CR0_AUTOCONVERT | _MAX31856_CR0_OCFAULT0)
         else:
-            raise ValueError(
-                'Must specify either spi for for hardware SPI or clk, cs, and do for softwrare SPI!')
-        self._spi.set_clock_hz(5000000)
-        # According to Wikipedia (on SPI) and MAX31856 Datasheet:
-        #   SPI mode 1 corresponds with correct timing, CPOL = 0, CPHA = 1
-        self._spi.set_mode(1)
-        self._spi.set_bit_order(SPI.MSBFIRST)
+            cr0_config = (_MAX31856_CR0_OCFAULT0)
 
-        self.cr0 = self.MAX31856_CR0_READ_CONT | ((ocdetect & 3) << 4) | (1 if ac_freq_50hz else 0)
-        self.cr1 = (((self.avgsel & 7) << 4) + (self.tc_type & 0x0f))
-
-        # Setup for reading continuously with T-Type thermocouple
-        self._write_register(self.MAX31856_REG_WRITE_CR0, 0)
-        self._write_register(self.MAX31856_REG_WRITE_CR1, self.cr1)
-        self._write_register(self.MAX31856_REG_WRITE_CR0, self.cr0)
-
-    @staticmethod
-    def _cj_temp_from_bytes(msb, lsb):
-        """
-        Takes in the msb and lsb from a Cold Junction (CJ) temperature reading and converts it
-        into a decimal value.
-
-        This function was removed from readInternalTempC() and moved to its own method to allow for
-            easier testing with standard values.
-
-        Args:
-            msb (hex): Most significant byte of CJ temperature
-            lsb (hex): Least significant byte of a CJ temperature
+        self._write_u8(_MAX31856_CR0_REG, cr0_config)
 
         """
-        #            (((msb w/o +/-) shifted by number of 1 byte above lsb)
-        #                                  + val_low_byte)
-        #                                          >> shifted back by # of dead bits
-        temp_bytes = (((msb & 0x7F) << 8) + lsb) >> 2
-
-        if msb & 0x80:
-            # Negative Value.  Scale back by number of bits
-            temp_bytes -= 2**(MAX31856.MAX31856_CONST_CJ_BITS -1)
-
-        #        temp_bytes*value of lsb
-        temp_c = temp_bytes*MAX31856.MAX31856_CONST_CJ_LSB
-
-        return temp_c
-
-    @staticmethod
-    def _thermocouple_temp_from_bytes(byte0, byte1, byte2):
+        Set CR1
+        CR1, 01h/81h:[7] reserved
+		[6:4] AVGSEL (0=1samp(default),1=2samp,2=4samp,3=8samp,0b1xx=16samp])
+		[3:0] TC type (0=B, 1=E, 2=J, 3=K(default), 4=N, 5=R, 6=S, 7=T, others, see datasheet)
         """
-        Converts the thermocouple byte values to a decimal value.
 
-        This function was removed from readInternalTempC() and moved to its own method to allow for
-            easier testing with standard values.
+        cr1_config = 0
+        cr1_config |= int(samples)
+        # add the new value for the TC type
+        cr1_config |= int(thermocouple_type)
+        self._write_u8(_MAX31856_CR1_REG, cr1_config)
 
-        Args:
-            byte2 (hex): Most significant byte of thermocouple temperature
-            byte1 (hex): Middle byte of thermocouple temperature
-            byte0 (hex): Least significant byte of a thermocouple temperature
-
-        Returns:
-            temp_c (float): Temperature in degrees celsius
         """
-        #            (((val_high_byte w/o +/-) shifted by 2 bytes above LSB)
-        #                 + (val_mid_byte shifted by number 1 byte above LSB)
-        #                                             + val_low_byte )
-        #                              >> back shift by number of dead bits
-        temp_bytes = (((byte2 & 0x7F) << 16) + (byte1 << 8) + byte0)
-        temp_bytes = temp_bytes >> 5
-
-        if byte2 & 0x80:
-            temp_bytes -= 2**(MAX31856.MAX31856_CONST_THERM_BITS -1)
-
-        #        temp_bytes*value of LSB
-        temp_c = temp_bytes*MAX31856.MAX31856_CONST_THERM_LSB
-
-        return temp_c
-
-    def read_internal_temp_c(self):
+        MASK, 02h/82h: This register masks faults from causing the FAULT output from asserting,
+				   but fault bits will still be set in the FSR (0x0F)
+		           All faults are masked by default... must turn them on if desired
+		[7:6] reserved
+		[5] CJ high fault mask
+		[4] CJ low fault mask
+		[3] TC high fault mask
+		[2] TC low fault mask
+		[1] OV/UV fault mask
+		[0] Open fault mask
         """
-        Return internal temperature value in degrees celsius.
+        mask_config = 0
+        mask_config |= (_MAX31856_FAULT_CJHIGH)
+        mask_config |= (_MAX31856_FAULT_CJLOW)
+        mask_config |= (_MAX31856_FAULT_TCHIGH)
+        mask_config |= (_MAX31856_FAULT_TCLOW)
+        mask_config |= (_MAX31856_FAULT_OVUV)
+        mask_config |= (_MAX31856_FAULT_OPEN)
+        self._write_u8(_MAX31856_MASK_REG, mask_config)
+
+    @property
+    def temperature(self):
+        """The temperature of the sensor and return its value in degrees Celsius. (read-only)"""
+        if not self._continuous:  # we need to trigger a measurement. Oneshot has a built-in 250ms sleep
+            self._perform_one_shot_measurement()
+
+        # unpack the 3-byte temperature as 4 bytes
+        raw_temp = unpack(
+            ">i", self._read_register(_MAX31856_LTCBH_REG, 3) + bytes([0])
+        )[0]
+
+        # shift to remove extra byte from unpack needing 4 bytes
+        raw_temp >>= 8
+
+        # effectively shift raw_read >> 12 to convert pseudo-float
+        temp_float = raw_temp / 4096.0
+
+        return temp_float
+
+    @property
+    def reference_temperature(self):
+        """The temperature of the cold junction in degrees Celsius. (read-only)"""
+        self._perform_one_shot_measurement()
+
+        raw_read = unpack(">h", self._read_register(_MAX31856_CJTH_REG, 2))[0]
+
+        # effectively shift raw_read >> 8 to convert pseudo-float
+        cold_junction_temp = raw_read / 256.0
+
+        return cold_junction_temp
+
+    @property
+    def temperature_thresholds(self):
+        """The thermocouple's low and high temperature thresholds
+        as a ``(low_temp, high_temp)`` tuple
         """
-        val_low_byte = self._read_register(self.MAX31856_REG_READ_CJTL)
-        val_high_byte = self._read_register(self.MAX31856_REG_READ_CJTH)
 
-        temp_c = MAX31856._cj_temp_from_bytes(val_high_byte, val_low_byte)
-        self._logger.debug("Cold Junction Temperature {0} deg. C".format(temp_c))
+        raw_low = unpack(">h", self._read_register(_MAX31856_LTLFTH_REG, 2))
+        raw_high = unpack(">h", self._read_register(_MAX31856_LTHFTH_REG, 2))
 
-        return temp_c
+        return (round(raw_low[0] / 16.0, 1), round(raw_high[0] / 16.0, 1))
 
-    def read_temp_c(self):
+    @temperature_thresholds.setter
+    def temperature_thresholds(self, val):
+
+        int_low = int(val[0] * 16)
+        int_high = int(val[1] * 16)
+
+        self._write_u8(_MAX31856_LTHFTH_REG, int_high >> 8)
+        self._write_u8(_MAX31856_LTHFTL_REG, int_high)
+
+        self._write_u8(_MAX31856_LTLFTH_REG, int_low >> 8)
+        self._write_u8(_MAX31856_LTLFTL_REG, int_low)
+
+    @property
+    def reference_temperature_thresholds(self):  # pylint: disable=invalid-name
+        """The cold junction's low and high temperature thresholds
+        as a ``(low_temp, high_temp)`` tuple
         """
-        Return the thermocouple temperature value in degrees celsius.
+        return (
+            float(unpack("b", self._read_register(_MAX31856_CJLF_REG, 1))[0]),
+            float(unpack("b", self._read_register(_MAX31856_CJHF_REG, 1))[0]),
+        )
+
+    @reference_temperature_thresholds.setter
+    def reference_temperature_thresholds(self, val):  # pylint: disable=invalid-name
+
+        self._write_u8(_MAX31856_CJLF_REG, int(val[0]))
+        self._write_u8(_MAX31856_CJHF_REG, int(val[1]))
+
+    @property
+    def fault(self):
+        """A dictionary with the status of each fault type where the key is the fault type and the
+        value is a bool if the fault is currently active
+
+        ===================   =================================
+        Key                   Fault type
+        ===================   =================================
+        "cj_range"            Cold junction range fault
+        "tc_range"            Thermocouple range fault
+        "cj_high"             Cold junction high threshold fault
+        "cj_low"              Cold junction low threshold fault
+        "tc_high"             Thermocouple high threshold fault
+        "tc_low"              Thermocouple low threshold fault
+        "voltage"             Over/under voltage fault
+        "open_tc"             Thermocouple open circuit fault
+        ===================   =================================
+
         """
-        val_low_byte = self._read_register(self.MAX31856_REG_READ_LTCBL)
-        val_mid_byte = self._read_register(self.MAX31856_REG_READ_LTCBM)
-        val_high_byte = self._read_register(self.MAX31856_REG_READ_LTCBH)
+        faults = self._read_register(_MAX31856_SR_REG, 1)[0]
+        return {
+            "raw": bin(faults),
+            "cj_range": bool(faults & _MAX31856_FAULT_CJRANGE),
+            "tc_range": bool(faults & _MAX31856_FAULT_TCRANGE),
+            "cj_high": bool(faults & _MAX31856_FAULT_CJHIGH),
+            "cj_low": bool(faults & _MAX31856_FAULT_CJLOW),
+            "tc_high": bool(faults & _MAX31856_FAULT_TCHIGH),
+            "tc_low": bool(faults & _MAX31856_FAULT_TCLOW),
+            "voltage": bool(faults & _MAX31856_FAULT_OVUV),
+            "open_tc": bool(faults & _MAX31856_FAULT_OPEN),
+        }
 
-        temp_c = MAX31856._thermocouple_temp_from_bytes(val_low_byte, val_mid_byte, val_high_byte)
+    def _perform_one_shot_measurement(self):
 
-        self._logger.debug("Thermocouple Temperature {0} deg. C".format(temp_c))
+        self._write_u8(_MAX31856_CJTO_REG, 0x0)
+        # read the current value of the first config register
+        conf_reg_0 = self._read_register(_MAX31856_CR0_REG, 1)[0]
 
-        return temp_c
+        # and the complement to guarantee the autoconvert bit is unset
+        conf_reg_0 &= ~_MAX31856_CR0_AUTOCONVERT
+        # or the oneshot bit to ensure it is set
+        conf_reg_0 |= _MAX31856_CR0_1SHOT
 
-    def read_fault_register(self):
-        """Return bytes containing fault codes and hardware problems.
+        # write it back with the new values, prompting the sensor to perform a measurement
+        self._write_u8(_MAX31856_CR0_REG, conf_reg_0)
 
-        TODO: Could update in the future to return human readable values
-        """
-        reg = self._read_register(self.MAX31856_REG_READ_FAULT)
-        return reg
+        sleep(0.250)
 
-    def _read_register(self, address):
-        """
-        Reads a register at address from the MAX31856
+    def _read_register(self, address, length):
+        _buffer = bytearray(4)
+        # pylint: disable=no-member
+        # Read a 16-bit BE unsigned value from the specified 8-bit address.
+        with self._device as device:
+            _buffer[0] = address & 0x7F
+            device.write(_buffer, end=1)
+            device.readinto(_buffer, end=length)
+        return _buffer[:length]
 
-        Args:
-            address (8-bit Hex): Address for read register.  Format 0Xh. Constants listed in class
-                as MAX31856_REG_READ_*
-
-        Note:
-            SPI transfer method is used.  The address is written in as the first byte, and then a
-            dummy value as the second byte. The data from the sensor is contained in the second
-            byte, the dummy byte is only used to keep the SPI clock ticking as we read in the
-            value.  The first returned byte is discarded because no data is transmitted while
-            specifying the register address.
-        """
-        raw = self._spi.transfer([address, 0x00])
-        if raw is None or len(raw) != 2:
-            raise RuntimeError('Did not read expected number of bytes from device!')
-
-        value = raw[1]
-        self._logger.debug('Read Register: 0x{0:02X}, Raw Value: 0x{1:02X}'.format(
-            (address & 0xFFFF), (value & 0xFFFF)))
-        return value
-
-    def _write_register(self, address, write_value):
-        """
-        Writes to a register at address from the MAX31856
-
-        Args:
-            address (8-bit Hex): Address for read register.  Format 0Xh. Constants listed in class
-                as MAX31856_REG_WRITE_*
-            write_value (8-bit Hex): Value to write to the register
-        """
-        self._spi.transfer([address, write_value])
-        self._logger.debug('Wrote Register: 0x{0:02X}, Value 0x{1:02X}'.format((address & 0xFF),
-                                                                            (write_value & 0xFF)))
-
-        # If we've gotten this far without an exception, the transmission must've gone through
-        return True
-
-    # Deprecated Methods
-    def readTempC(self):    #pylint: disable-msg=invalid-name
-        """Depreciated due to Python naming convention, use read_temp_c instead
-        """
-        warnings.warn("Depreciated due to Python naming convention, use read_temp_c() instead", DeprecationWarning)
-        return read_temp_c(self)
-
-    def readInternalTempC(self):    #pylint: disable-msg=invalid-name
-        """Depreciated due to Python naming convention, use read_internal_temp_c instead
-        """
-        warnings.warn("Depreciated due to Python naming convention, use read_internal_temp_c() instead", DeprecationWarning)
-        return read_internal_temp_c(self)
-
-    # added by jbruce to mimic MAX31855 lib
-    def to_c(self, celsius):
-        '''Celsius passthrough for generic to_* method.'''
-        return celsius
-
-    def to_k(self, celsius):
-        '''Convert celsius to kelvin.'''
-        return celsius + 273.15
-
-    def to_f(self, celsius):
-        '''Convert celsius to fahrenheit.'''
-        return celsius * 9.0/5.0 + 32
-
-    def checkErrors(self):
-        data = self.read_fault_register()
-        self.noConnection = (data & 0x00000001) != 0
-        self.unknownError = (data & 0xfe) != 0
-
-    def get(self):
-        self.checkErrors()
-        celcius = self.read_temp_c()
-        return getattr(self, "to_" + self.units)(celcius)
-
-
-if __name__ == "__main__":
-
-    # Multi-chip example
-    import time
-    cs_pins = [6]
-    clock_pin = 13
-    data_pin = 5
-    di_pin = 26
-    units = "c"
-    thermocouples = []
-    for cs_pin in cs_pins:
-        thermocouples.append(MAX31856(avgsel=0, ac_freq_50hz=True, tc_type=MAX31856.MAX31856_K_TYPE, software_spi={'clk': clock_pin, 'cs': cs_pin, 'do': data_pin, 'di': di_pin}, units=units))
-
-    running = True
-    while(running):
-        try:
-            for thermocouple in thermocouples:
-                rj = thermocouple.read_internal_temp_c()
-                tc = thermocouple.get()
-                print("tc: {} and rj: {}, NC:{} ??:{}".format(tc, rj, thermocouple.noConnection, thermocouple.unknownError))
-            time.sleep(1)
-        except KeyboardInterrupt:
-            running = False
-    for thermocouple in thermocouples:
-        thermocouple.cleanup()
+    def _write_u8(self, address, val):
+        _buffer = bytearray(4)
+        # Write an 8-bit unsigned value to the specified 8-bit address.
+        with self._device as device:
+            _buffer[0] = (address | 0x80) & 0xFF
+            _buffer[1] = val & 0xFF
+            device.write(_buffer, end=2)  # pylint: disable=no-member
