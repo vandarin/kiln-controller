@@ -6,6 +6,8 @@ import csv
 import time
 import argparse
 
+from lib.zone import Zone
+
 
 def recordprofile(csvfile, targettemp):
 
@@ -22,18 +24,27 @@ def recordprofile(csvfile, targettemp):
     script_dir = os.path.dirname(os.path.realpath(__file__))
     sys.path.insert(0, script_dir + '/lib/')
 
-    from oven import RealOven, SimulatedOven
+    from lib.oven import RealOven, SimulatedOven
+
+    # construct the oven
+    if config.simulate:
+        oven = SimulatedOven(config)
+    else:
+        oven = RealOven(config)
+        # wait a bit for temps to stabilize
+        while True:
+            t = Zone.getAvgTemp()
+            if t > 0:
+                break
+            time.sleep(0.25)
 
     # open the file to log data to
     f = open(csvfile, 'w')
     csvout = csv.writer(f)
-    csvout.writerow(['time', 'temperature'])
-
-    # construct the oven
-    if config.simulate:
-        oven = SimulatedOven()
-    else:
-        oven = RealOven()
+    header = ['time', 'temperature']
+    for zone in Zone.stats:
+        header.append(zone["Name"])
+    csvout.writerow(header)
 
     # Main loop:
     #
@@ -46,26 +57,28 @@ def recordprofile(csvfile, targettemp):
     try:
         stage = 'heating'
         if not config.simulate:
-            oven.output.heat(1, tuning=True)
+            oven.forceOn()
 
         while True:
-            temp = oven.board.temp_sensor.temperature + \
-                config.thermocouple_offset
-
-            csvout.writerow([time.time(), temp])
+            temp = Zone.getAvgTemp()
+            row = [time.time(), temp]
+            for zone in Zone.stats:
+                row.append(zone["Temp"])
+            csvout.writerow(row)
             f.flush()
 
             if stage == 'heating':
                 if temp >= targettemp:
                     if not config.simulate:
-                        oven.output.heat(0)
+                        oven.forceOff()
                     stage = 'cooling'
 
             elif stage == 'cooling':
                 if temp < targettemp:
                     break
 
-            print("stage = %s, actual = %s, target = %s" % (stage,temp,targettemp))
+            print("stage = %s, actual = %s, target = %s" %
+                  (stage, temp, targettemp))
             time.sleep(1)
 
         f.close()
@@ -73,7 +86,7 @@ def recordprofile(csvfile, targettemp):
     finally:
         # ensure we always shut the oven down!
         if not config.simulate:
-            oven.output.heat(0)
+            oven.reset()
 
 
 def line(a, b, x):
@@ -101,10 +114,13 @@ def plot(xdata, ydata,
 
     pyplot.plot(tangent_min[0], tangent_min[1], 'v', color='red')
     pyplot.plot(tangent_max[0], tangent_max[1], 'v', color='red')
-    pyplot.plot([minx, maxx], [line(tangent_slope, tangent_offset, minx), line(tangent_slope, tangent_offset, maxx)], '--', color='red')
+    pyplot.plot([minx, maxx], [line(tangent_slope, tangent_offset, minx), line(
+        tangent_slope, tangent_offset, maxx)], '--', color='red')
 
-    pyplot.plot([lower_crossing_x, lower_crossing_x], [miny, maxy], '--', color='black')
-    pyplot.plot([upper_crossing_x, upper_crossing_x], [miny, maxy], '--', color='black')
+    pyplot.plot([lower_crossing_x, lower_crossing_x],
+                [miny, maxy], '--', color='black')
+    pyplot.plot([upper_crossing_x, upper_crossing_x],
+                [miny, maxy], '--', color='black')
 
     pyplot.show()
 
@@ -143,7 +159,8 @@ def calculate(filename, tangentdivisor, showplot):
             tangent_max = (rowx, rowy)
 
     # calculate tangent line to the main temperature curve
-    tangent_slope = (tangent_max[1] - tangent_min[1]) / (tangent_max[0] - tangent_min[0])
+    tangent_slope = (tangent_max[1] - tangent_min[1]) / \
+        (tangent_max[0] - tangent_min[0])
     tangent_offset = tangent_min[1] - line(tangent_slope, 0, tangent_min[0])
 
     # determine the point at which the tangent line crosses the min/max temperaturess
@@ -166,7 +183,6 @@ def calculate(filename, tangentdivisor, showplot):
     print("pid_ki = %s" % (1 / Ki))
     print("pid_kd = %s" % (Kd))
 
-
     if showplot:
         plot(xdata, ydata,
              tangent_min, tangent_max, tangent_slope, tangent_offset,
@@ -178,15 +194,22 @@ if __name__ == "__main__":
     subparsers = parser.add_subparsers()
     parser.set_defaults(mode='')
 
-    parser_profile = subparsers.add_parser('recordprofile', help='Record kiln temperature profile')
-    parser_profile.add_argument('csvfile', type=str, help="The CSV file to write to.")
-    parser_profile.add_argument('--targettemp', type=int, default=400, help="The target temperature to drive the kiln to (default 400).")
+    parser_profile = subparsers.add_parser(
+        'recordprofile', help='Record kiln temperature profile')
+    parser_profile.add_argument(
+        'csvfile', type=str, help="The CSV file to write to.")
+    parser_profile.add_argument('--targettemp', type=int, default=400,
+                                help="The target temperature to drive the kiln to (default 400).")
     parser_profile.set_defaults(mode='recordprofile')
 
-    parser_zn = subparsers.add_parser('zn', help='Calculate Ziegler-Nicols parameters')
-    parser_zn.add_argument('csvfile', type=str, help="The CSV file to read from. Must contain two columns called time (time in seconds) and temperature (observed temperature)")
-    parser_zn.add_argument('--showplot', action='store_true', help="If set, also plot results (requires pyplot to be pip installed)")
-    parser_zn.add_argument('--tangentdivisor', type=float, default=8, help="Adjust the tangent calculation to fit better. Must be >= 2 (default 8).")
+    parser_zn = subparsers.add_parser(
+        'zn', help='Calculate Ziegler-Nicols parameters')
+    parser_zn.add_argument(
+        'csvfile', type=str, help="The CSV file to read from. Must contain two columns called time (time in seconds) and temperature (observed temperature)")
+    parser_zn.add_argument('--showplot', action='store_true',
+                           help="If set, also plot results (requires pyplot to be pip installed)")
+    parser_zn.add_argument('--tangentdivisor', type=float, default=8,
+                           help="Adjust the tangent calculation to fit better. Must be >= 2 (default 8).")
     parser_zn.set_defaults(mode='zn')
 
     args = parser.parse_args()

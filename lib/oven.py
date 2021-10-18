@@ -1,4 +1,9 @@
+from lib.max31856 import MAX31856
+from lib.safetyswitch import SafetySwitch
+from lib.tempSensor import TempSensorSimulated
 from lib.zone import Zone, SimulatedZone
+import board
+import digitalio
 import threading
 import time
 import datetime
@@ -16,11 +21,10 @@ class Oven(threading.Thread):
         threading.Thread.__init__(self)
         self.daemon = True
         self.temperature = 0
+        self.faulted_count = 0
         self.time_step = config.sensor_time_wait
         self.kiln_must_catch_up = config.kiln_must_catch_up
         self.kiln_must_catch_up_max_error = config.kiln_must_catch_up_max_error
-        self.kwh_rate = config.kwh_rate,
-        self.currency_type = config.currency_type,
         self.emergency_shutoff_temp = config.emergency_shutoff_temp
         self.initial_pid_params = {
             'ki': config.pid_ki,
@@ -30,22 +34,42 @@ class Oven(threading.Thread):
         }
         self.zone_max_lag = config.zone_max_lag
         self.zones = []
-        for zc in config.zones:
-            if config.simulate:
-                zone = SimulatedZone(
-                    zc,
-                    config.sensor_time_wait,
+        if config.simulate:
+            for zc in config.zones:
+                self.zones.append(
+                    SimulatedZone(
+                        TempSensorSimulated(config.sensor_time_wait),
+                        config.sensor_time_wait,
+                    )
                 )
-            else:
+        else:
+            spi = board.SPI()
+            sensors = []
+            for chip in config.thermocouples['chips']:
+                cs = digitalio.DigitalInOut(chip.cs_pin)
+                cs.direction = digitalio.Direction.OUTPUT
+                cs.value = True
+                sensor = MAX31856(
+                    spi, cs, chip.tc_type, continuous=True, ac_freq_50hz=config.thermocouples['ac_freq_50hz'],
+                )
+                sensors.append(sensor)
+            for sensor in sensors:
+                # hardcoded safety limits in celsius
+                sensor.temperature_thresholds = (-20.0, 1200)
+                sensor.reference_temperature_thresholds = (-20.0, 60.0)
+            for zc in config.zones:
                 zone = Zone(
-                    zc,
-                    config.sensor_time_wait,
-                    config.temp_scale,
-                    config.honour_theromocouple_short_errors,
-                    config.temperature_average_samples
+                    name=zc.name,
+                    gpio_heat=zc.gpio_heat,
+                    thermocouple=sensors[zc.thermocouple],
+                    sensor_time_wait=config.sensor_time_wait,
+                    temp_scale=config.temp_scale,
                 )
+                zone.start()
+                self.zones.append(zone)
+            self.safety_switch = SafetySwitch(
+                config.safety_switch, config.safety_switch_active_value)
 
-            self.zones.append(zone)
         self.reset()
 
     def reset(self):
@@ -55,28 +79,22 @@ class Oven(threading.Thread):
         self.runtime = 0
         self.totaltime = 0
         self.target = 0
+        self.faulted_count = 0
         for zone in self.zones:
             zone.reset()
         self.pid = PID(**self.initial_pid_params)
+        self.safety_switch.off()
 
     def run_profile(self, profile, startat=0):
         self.reset()
+        zone: Zone
         for zone in self.zones:
-            if zone.temp_sensor.noConnection:
-                log.info(
-                    "Refusing to start profile - thermocouple not connected: Zone %d" % (zone.zone_index))
-                return
-            if zone.temp_sensor.shortToGround:
-                log.info(
-                    "Refusing to start profile - thermocouple short to ground: Zone %d" % (zone.zone_index))
-                return
-            if zone.temp_sensor.shortToVCC:
-                log.info(
-                    "Refusing to start profile - thermocouple short to VCC: Zone %d" % (zone.zone_index))
-                return
-            if zone.temp_sensor.unknownError:
-                log.info(
-                    "Refusing to start profile - thermocouple unknown error: Zone %d" % (zone.zone_index))
+            if zone.getTemperature() > self.emergency_shutoff_temp:
+                log.error("Refusing to start profile - Zone %s is too hot. %0.1f" %
+                          (zone.name, zone.getTemperature()))
+            if zone.isFaulted():
+                log.error(
+                    "Refusing to start profile - Zone %s thermocouple faulted. \n%s" % (zone.name, zone.getFaults()))
                 return
 
         log.info("Running schedule %s" % profile.name)
@@ -94,7 +112,7 @@ class Oven(threading.Thread):
         '''shift the whole schedule forward in time by one time_step
         to wait for the kiln to catch up'''
         if self.kiln_must_catch_up == True:
-            temp = self.getAverageTemp()
+            temp = Zone.getAvgTemp()
             # kiln too cold, wait for it to heat up
             if self.target - temp > self.kiln_must_catch_up_max_error and self.profile.isRampingUp(self.runtime):
                 log.info("kiln must catch up, too cold, shifting schedule")
@@ -119,27 +137,30 @@ class Oven(threading.Thread):
     def update_target_temp(self):
         self.target = self.profile.get_target_temperature(self.runtime)
 
+    def update_temperature(self):
+        self.temperature = Zone.getAvgTemp()
+
     def reset_if_emergency(self):
+        zone: Zone
         for zone in self.zones:
             '''reset if the temperature is way TOO HOT, or other critical errors detected'''
-            if (zone.temp_sensor.temperature >=
+            if (zone.getTemperature() >=
                     self.emergency_shutoff_temp):
-                log.info("emergency!!! temperature too high, shutting down")
+                log.error("emergency!!! temperature too high, shutting down")
                 self.reset()
 
-            if zone.temp_sensor.noConnection:
-                log.info(
-                    "emergency!!! lost connection to thermocouple, shutting down")
-                self.reset()
-
-            if zone.temp_sensor.unknownError:
-                log.info("emergency!!! unknown thermocouple error, shutting down")
-                self.reset()
+            if zone.isFaulted():
+                self.faulted_count += 1
 
             if zone.temp_sensor.bad_percent > 30:
-                log.info(
+                log.error(
                     "emergency!!! too many errors in a short period, shutting down")
                 self.reset()
+        if self.faulted_count > 10:
+            log.error(
+                "emergency!! Too many thermocouple faults. shutting down."
+            )
+            self.reset()
 
     def reset_if_schedule_ended(self):
         if self.runtime > self.totaltime:
@@ -149,13 +170,10 @@ class Oven(threading.Thread):
     def get_state(self):
         state = {
             'runtime': self.runtime,
-            'temperature': self.getAverageTemp(),
+            'temperature': Zone.getAvgTemp(),
             'target': self.target,
             'state': self.state,
-            'heat': self.heat,
             'totaltime': self.totaltime,
-            'kwh_rate': self.kwh_rate,
-            'currency_type': self.currency_type,
             'profile': self.profile.name if self.profile else None,
             'zones': Zone.stats
         }
@@ -163,6 +181,7 @@ class Oven(threading.Thread):
 
     def run(self):
         while True:
+            self.update_temperature()
             if self.state == "IDLE":
                 time.sleep(1)
                 continue
@@ -173,23 +192,18 @@ class Oven(threading.Thread):
                 self.heat_then_cool()
                 self.reset_if_emergency()
                 self.reset_if_schedule_ended()
+                time.sleep(self.time_step)
 
     def heat_then_cool(self):
         pid = self.pid.compute(self.target,
-                               self.getAverageTemp())
+                               Zone.getAvgTemp())
         heat_on = float(self.time_step * pid)
-        heat_off = float(self.time_step * (1 - pid))
-
-        # self.heat is for the front end to display if the heat is on
-        self.heat = 0.0
-        if heat_on > 0:
-            self.heat = heat_on
 
         for zone in self.zones:
             zone_pid = self.calc_zone_pid(pid, zone)
             zone_heat_on = float(self.time_step * zone_pid)
             zone.heat_for(zone_heat_on)
-        self.log_heating(pid, heat_on, heat_off)
+        self.log_heating(pid, heat_on, self.time_step - heat_on)
 
     def calc_zone_pid(self, pid: float, zone: Zone) -> float:
         range = zone.getTempRange()
@@ -202,17 +216,11 @@ class Oven(threading.Thread):
         # range is within tolerance, no adjustment needed
         return pid
 
-    def getAverageTemp(self):
-        temps = [d['Temp'] for d in Zone.stats]
-        if len(temps) == 0:
-            return 0
-        return sum(temps) / len(temps)
-
     def log_heating(self, pid, heat_on, heat_off):
         time_left = self.totaltime - self.runtime
 
         log.info("BASE: temp=%.2f, target=%.2f, pid=%.3f, heat_on=%.2f, heat_off=%.2f, run_time=%d, total_time=%d, time_left=%d" %
-                 (self.getAverageTemp(),
+                 (Zone.getAvgTemp(),
                   self.target,
                   pid,
                   heat_on,
@@ -221,6 +229,18 @@ class Oven(threading.Thread):
                   self.totaltime,
                   time_left))
         log.info("Zone info: %s" % (self.zones))
+
+    def forceOff(self):
+        if 'kiln_tuning' in globals():
+            self.safety_switch.off()
+            for zone in self.zones:
+                zone.forceOff()
+
+    def forceOn(self):
+        if 'kiln_tuning' in globals():
+            self.safety_switch.on()
+            for zone in self.zones:
+                zone.forceOn()
 
 
 class SimulatedOven(Oven):
@@ -262,20 +282,13 @@ class SimulatedOven(Oven):
 
 class RealOven(Oven):
 
-    def __init__(self):
-        self.board = Board()
-        self.output = Output()
-        self.reset()
-
+    def __init__(self, config):
         # call parent init
-        Oven.__init__(self)
+        Oven.__init__(self, config)
+        self.reset()
 
         # start thread
         self.start()
-
-    def reset(self):
-        super().reset()
-        self.output.cool(0)
 
 
 class Profile():

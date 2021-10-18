@@ -51,6 +51,7 @@ _MAX31856_CR0_OCFAULT0 = const(0x10)
 _MAX31856_CR0_CJ = const(0x08)
 _MAX31856_CR0_FAULT = const(0x04)
 _MAX31856_CR0_FAULTCLR = const(0x02)
+_MAX31856_CR0_AC50HZ = const(0x01)
 
 _MAX31856_CR1_REG = const(0x01)
 _MAX31856_MASK_REG = const(0x02)
@@ -124,6 +125,7 @@ class MAX31856:
     :param ~microcontroller.Pin cs: The pin used for the CS signal.
     :param ~adafruit_max31856.ThermocoupleType thermocouple_type: The type of thermocouple.\
       Default is Type K.
+    :param ~bool continuous: Continuous measurements vs. Oneshot conversion
 
     **Quickstart: Importing and using the MAX31856**
 
@@ -153,7 +155,14 @@ class MAX31856:
 
     """
 
-    def __init__(self, spi, cs, thermocouple_type=ThermocoupleType.K, continuous=False, samples=SampleType.AVG_SEL_1SAMP):
+    def __init__(self,
+                 spi,
+                 cs,
+                 thermocouple_type=ThermocoupleType.K,
+                 continuous=False,
+                 samples=SampleType.AVG_SEL_1SAMP,
+                 ac_freq_50hz=False,
+                 ):
         self._device = SPIDevice(spi, cs, baudrate=100000, polarity=0, phase=1)
         self._continuous = continuous
 
@@ -173,7 +182,8 @@ class MAX31856:
             cr0_config = (_MAX31856_CR0_AUTOCONVERT | _MAX31856_CR0_OCFAULT0)
         else:
             cr0_config = (_MAX31856_CR0_OCFAULT0)
-
+        if ac_freq_50hz:
+            cr0_config |= _MAX31856_CR0_AC50HZ
         self._write_u8(_MAX31856_CR0_REG, cr0_config)
 
         """
@@ -301,7 +311,7 @@ class MAX31856:
         """
         faults = self._read_register(_MAX31856_SR_REG, 1)[0]
         return {
-            "raw": bin(faults),
+            "raw": faults,
             "cj_range": bool(faults & _MAX31856_FAULT_CJRANGE),
             "tc_range": bool(faults & _MAX31856_FAULT_TCRANGE),
             "cj_high": bool(faults & _MAX31856_FAULT_CJHIGH),

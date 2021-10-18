@@ -15,6 +15,8 @@ from gevent.pywsgi import WSGIServer
 from geventwebsocket.handler import WebSocketHandler
 from geventwebsocket import WebSocketError
 
+from lib.zone import Zone
+
 
 try:
     sys.dont_write_bytecode = True
@@ -262,11 +264,17 @@ def delete_profile(profile):
 
 
 def get_config():
-    return json.dumps({"temp_scale": config.temp_scale,
-                       "time_scale_slope": config.time_scale_slope,
-                       "time_scale_profile": config.time_scale_profile,
-                       "kwh_rate": config.kwh_rate,
-                       "currency_type": config.currency_type})
+    return json.dumps(
+        {
+            "temp_scale": config.temp_scale,
+            "time_scale_slope": config.time_scale_slope,
+            "time_scale_profile": config.time_scale_profile,
+            "kwh_rate": config.kwh_rate,
+            "currency_type": config.currency_type,
+            "hazard_temp": config.emergency_shutoff_temp,
+            "zones": [{"Name": z['Name'], "Heated": z['Heated']} for z in Zone.stats]
+        }
+    )
 
 
 def main():

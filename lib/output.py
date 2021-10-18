@@ -1,25 +1,25 @@
 import logging
 import time
 
+from microcontroller import Pin
+
 log = logging.getLogger(__name__)
 
 
 class Output(object):
-    def __init__(self, gpio_heat):
+    def __init__(self, gpio_heat: Pin):
         self.active = False
         self.gpio_heat = gpio_heat
         self.load_libs()
 
     def load_libs(self):
         try:
-            try:
-                import RPi.GPIO as GPIO
-            except ImportError:
-                log.warning("Imported FakeRPi, no GPIO interaction")
-                import FakeRPi.GPIO as GPIO
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)
-            GPIO.setup(self.gpio_heat, GPIO.OUT)
+
+            import digitalio
+
+            GPIO = digitalio.DigitalInOut(self.gpio_heat)
+            GPIO.direction = digitalio.Direction.OUTPUT
+            GPIO.value = False  # default to off
             self.active = True
             self.GPIO = GPIO
         except:
@@ -28,11 +28,11 @@ class Output(object):
             self.active = False
 
     def heat(self, sleepfor, tuning=False):
-        self.GPIO.output(self.gpio_heat, self.GPIO.HIGH)
+        self.GPIO.value = True
         if tuning:
             return
         time.sleep(sleepfor)
         self.off()
 
     def off(self):
-        self.GPIO.output(self.gpio_heat, self.GPIO.LOW)
+        self.GPIO.value = False

@@ -1,56 +1,74 @@
 from enum import Enum
+
+from microcontroller import Pin
 from lib.output import Output
 import threading
 import time
 from lib.zoneConfig import ZoneConfig
-from lib.tempSensor import TempSensorReal, TempSensorSimulated
+from lib.tempSensor import TempSensor, TempSensorReal, TempSensorSimulated
 from lib.enums import BoardModel
 import random
+import logging
+
+log = logging.getLogger(__name__)
 
 
-class Zone:
+class Zone(threading.Thread):
     stats = []
 
     def __init__(
             self,
-            zc: ZoneConfig,
+            name: str,
+            gpio_heat: Pin,
+            thermocouple: TempSensor,
             sensor_time_wait: int,
             temp_scale: str,
-            honour_theromocouple_short_errors: bool,
-            temperature_average_samples: int
+            temperature_average_samples: int = 1
     ) -> None:
-
         threading.Thread.__init__(self)
+        self.daemon = True
+        self.zone_name = name
         self.temp_sensor = TempSensorReal(
-            zc, sensor_time_wait, temp_scale,
-            honour_theromocouple_short_errors,
-            temperature_average_samples
+            thermocouple, sensor_time_wait, temp_scale, temperature_average_samples
         )
+        self.heat = 0
+        if gpio_heat is not None:
+            log.info("Heater output created on %s." % (gpio_heat,))
+            self.output = Output(gpio_heat)
+        else:
+            self.output = None
+            log.warn("No output, temp sensor only")
         self.temp_sensor.start()
 
         self.time_step = sensor_time_wait
-        self.thermocouple_offset = zc.thermocouple_offset
 
         self.zone_index = len(Zone.stats)
         Zone.stats.append(self.getStats())
-        self.heat = 0
-        self.output = Output(zc.gpio_heat)
 
     def __repr__(self) -> str:
         return "{Name}: {Temp}° ({Delta}) <{Heat_pct}%>".format(**self.getStats())
 
+    def run(self):
+        while True:
+            Zone.stats[self.zone_index] = self.getStats()
+            time.sleep(self.time_step)
+
     def getDelta(self) -> float:
-        if len(Zone.stats):
-            temps = self.getTemps()
-            avg = sum(temps)/len(temps)
-            return self.getTemperature() - avg
-        return 0.0
+        if self.output is not None:
+            return self.getTemperature() - Zone.getAvgTemp()
+        return 0
+
+    @staticmethod
+    def getAvgTemp() -> float:
+        temps = Zone.getTemps()
+        avg = sum(temps)/len(temps)
+        return round(avg, 2)
 
     @staticmethod
     def getTemps() -> list:
         if len(Zone.stats):
-            return [d['Temp'] for d in Zone.stats]
-        return []
+            return [d['Temp'] for d in Zone.stats if d['Heated']]
+        return [0]
 
     @staticmethod
     def getTempRange() -> float:
@@ -61,36 +79,57 @@ class Zone:
 
     def getStats(self) -> dict:
         return {
-            'Name': "Zone_%d" % (self.zone_index + 1),
+            'Name': self.zone_name,
+            'Heated': self.output is not None,
             'Temp': round(self.getTemperature(), 1),
             'Delta': round(self.getDelta(), 1),
-            'Heat_pct': round(self.heat / self.time_step * 100, 0)
+            'Heat': self.heat,
+            'Heat_pct': round(self.heat / self.time_step * 100, 0),
+            'Faulted': self.isFaulted(),
         }
 
+    def isFaulted(self) -> bool:
+        return self.temp_sensor.faulted
+
+    def getFaults(self) -> dict:
+        return self.temp_sensor.fault
+
     def getTemperature(self) -> float:
-        return self.temp_sensor.temperature + self.thermocouple_offset
+        return self.temp_sensor.temperature
 
     def heat_for(self, heat_on):
+        if self.output is None:
+            return
         self.heat = heat_on
         self.output.heat(heat_on)
 
     def reset(self):
+        if self.output is None:
+            return
         self.heat = 0
         self.output.off()
+
+    def forceOff(self):
+        self.reset()
+
+    def forceOn(self):
+        if 'kiln_tuning' in globals():
+            self.output.on()
 
 
 class SimulatedZone(Zone):
     def __init__(
         self,
-        zc: ZoneConfig,
+        temp_sensor: TempSensor,
         sensor_time_wait: int,
     ) -> None:
         threading.Thread.__init__(self)
         self.heat = 0
-        self.temp_sensor = TempSensorSimulated(sensor_time_wait)
-        self.thermocouple_offset = zc.thermocouple_offset
+        self.output = False
+        self.temp_sensor = temp_sensor,
         self.time_step = sensor_time_wait
         self.zone_index = len(Zone.stats)
+        self.zone_name = "Zone%d" % (self.zone_index,)
         Zone.stats.append(self.getStats())
 
     def setSimulatedParams(self, config):

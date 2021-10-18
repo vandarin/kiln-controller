@@ -27,7 +27,7 @@ logging.basicConfig(level=config.log_level, format=config.log_format)
 log = logging.getLogger("thermocouple-test")
 log.info("Starting thermocouple test")
 
-spi = adafruit_bitbangio.SPI(**config.thermocouples['spi_pins'].asDict())
+spi = board.SPI()
 
 cs_pins = []
 for chip in config.thermocouples['chips']:
