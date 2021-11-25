@@ -11,6 +11,7 @@ import logging
 import json
 
 log = logging.getLogger(__name__)
+event = threading.Event()
 
 
 class Oven(threading.Thread):
@@ -190,7 +191,7 @@ class Oven(threading.Thread):
                 self.reset_if_emergency()
                 continue
             if self.state == "IDLE":
-                time.sleep(1)
+                event.wait(1)
                 continue
             if self.state == "RUNNING":
                 self.catch_up()
@@ -199,7 +200,7 @@ class Oven(threading.Thread):
                 self.heat_then_cool()
                 self.reset_if_emergency()
                 self.reset_if_schedule_ended()
-                time.sleep(self.time_step)
+                event.wait(self.time_step)
 
     def heat_then_cool(self):
         pid = self.pid.compute(self.target,
@@ -277,7 +278,7 @@ class SimulatedOven(Oven):
         super().heat_then_cool()
         # we don't actually spend time heating & cooling during
         # a simulation, so sleep.
-        time.sleep(self.time_step)
+        event.wait(self.time_step)
 
     def log_heating(self, pid, heat_on, heat_off):
         super().log_heating(pid, heat_on, heat_off)

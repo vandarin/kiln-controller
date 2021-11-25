@@ -11,6 +11,7 @@ import random
 import logging
 
 log = logging.getLogger(__name__)
+event = threading.Event()
 
 
 class Zone(threading.Thread):
@@ -57,16 +58,16 @@ class Zone(threading.Thread):
                 # heater attached, turn it on if needed
                 if self._tuning:
                     self.output.on()
-                    time.sleep(1)
+                    event.wait(1)
                     continue
                 if self.heat > 0:
                     self.output.on()
-                time.sleep(self.heat)
+                event.wait(self.heat)
                 self.output.off()
-                time.sleep(self.time_step - self.heat)
+                event.wait(self.time_step - self.heat)
             else:
                 # no heater attached, just sleep
-                time.sleep(self.time_step)
+                event.wait(self.time_step)
 
     def getDelta(self) -> float:
         if self.output is not None:

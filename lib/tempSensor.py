@@ -6,6 +6,7 @@ import time
 import logging
 
 log = logging.getLogger(__name__)
+event = threading.Event()
 
 
 class TempSensor(threading.Thread):
@@ -85,4 +86,4 @@ class TempSensorReal(TempSensor):
                 self.temperature = self.convert_to_scale(
                     sum(temps) / len(temps)) + self.offset
             log.debug("Logged temp: %0.1f" % (self.temperature,))
-            time.sleep(self.sleeptime)
+            event.wait(self.sleeptime)

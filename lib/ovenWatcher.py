@@ -5,6 +5,7 @@ import time
 import datetime
 from lib.oven import Oven
 log = logging.getLogger(__name__)
+event = threading.Event()
 
 
 class OvenWatcher(threading.Thread):
@@ -37,7 +38,7 @@ class OvenWatcher(threading.Thread):
             else:
                 self.recording = False
             self.notify_all(oven_state)
-            time.sleep(self.oven.time_step)
+            event.wait(self.oven.time_step)
 
     def lastlog_subset(self, maxpts=50):
         '''send about maxpts from lastlog by skipping unwanted data'''
