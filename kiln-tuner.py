@@ -5,12 +5,13 @@ import sys
 import csv
 import time
 import argparse
+import threading
 
 from lib.zone import Zone
 
 
 def recordprofile(csvfile, targettemp):
-
+    event = threading.Event()
     try:
         sys.dont_write_bytecode = True
         import config
@@ -32,11 +33,7 @@ def recordprofile(csvfile, targettemp):
     else:
         oven = RealOven(config)
         # wait a bit for temps to stabilize
-        while True:
-            t = Zone.getAvgTemp()
-            if t > 0:
-                break
-            time.sleep(0.25)
+        event.wait(1)
 
     # open the file to log data to
     f = open(csvfile, 'w')
@@ -57,10 +54,12 @@ def recordprofile(csvfile, targettemp):
     try:
         stage = 'heating'
         if not config.simulate:
+            oven.enableTuning()
             oven.forceOn()
 
         while True:
-            temp = Zone.getAvgTemp()
+            oven.update_temperature()
+            temp = oven.temperature
             row = [time.time(), temp]
             for zone in Zone.stats:
                 row.append(zone["Temp"])
@@ -79,7 +78,7 @@ def recordprofile(csvfile, targettemp):
 
             print("stage = %s, actual = %s, target = %s" %
                   (stage, temp, targettemp))
-            time.sleep(1)
+            event.wait(1)
 
         f.close()
 

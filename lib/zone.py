@@ -23,8 +23,10 @@ class Zone(threading.Thread):
             thermocouple: TempSensor,
             sensor_time_wait: int,
             temp_scale: str,
+            gpio_active_high: bool = True,
             temperature_average_samples: int = 1
     ) -> None:
+        self._tuning = False
         threading.Thread.__init__(self)
         self.daemon = True
         self.zone_name = name
@@ -34,7 +36,7 @@ class Zone(threading.Thread):
         self.heat = 0
         if gpio_heat is not None:
             log.info("Heater output created on %s." % (gpio_heat,))
-            self.output = Heater(gpio_heat)
+            self.output = Heater(gpio_heat, gpio_active_high)
         else:
             self.output = None
             log.warn("No output, temp sensor only")
@@ -51,9 +53,12 @@ class Zone(threading.Thread):
         while True:
             # update stats
             Zone.stats[self.zone_index] = self.getStats()
-
             if self.output is not None:
                 # heater attached, turn it on if needed
+                if self._tuning:
+                    self.output.on()
+                    time.sleep(1)
+                    continue
                 if self.heat > 0:
                     self.output.on()
                 time.sleep(self.heat)
@@ -113,17 +118,22 @@ class Zone(threading.Thread):
         self.heat = heat_on
 
     def reset(self):
+        self._tuning = False
         if self.output is None:
             return
         self.heat = 0
         self.output.off()
 
     def forceOff(self):
+        self._tuning = False
         self.reset()
 
     def forceOn(self):
-        if 'kiln_tuning' in globals():
+        if self._tuning and self.output is not None:
             self.output.on()
+
+    def enableTuning(self):
+        self._tuning = True
 
 
 class SimulatedZone(Zone):

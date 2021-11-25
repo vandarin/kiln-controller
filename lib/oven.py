@@ -18,6 +18,7 @@ class Oven(threading.Thread):
        for either a real or simulated oven'''
 
     def __init__(self, config):
+        self._tuning = False
         threading.Thread.__init__(self)
         self.daemon = True
         self.temperature = 0
@@ -61,6 +62,7 @@ class Oven(threading.Thread):
                 zone = Zone(
                     name=zc.name,
                     gpio_heat=zc.gpio_heat,
+                    gpio_active_high=zc.gpio_active_high,
                     thermocouple=sensors[zc.thermocouple],
                     sensor_time_wait=config.sensor_time_wait,
                     temp_scale=config.temp_scale,
@@ -73,6 +75,7 @@ class Oven(threading.Thread):
         self.reset()
 
     def reset(self):
+        self._tuning = False
         self.state = "IDLE"
         self.profile = None
         self.start_time = 0
@@ -103,6 +106,7 @@ class Oven(threading.Thread):
         self.state = "RUNNING"
         self.start_time = datetime.datetime.now()
         self.startat = startat * 60
+        self.safety_switch.on()
         log.info("Starting")
 
     def abort_run(self):
@@ -182,6 +186,9 @@ class Oven(threading.Thread):
     def run(self):
         while True:
             self.update_temperature()
+            if self._tuning:
+                self.reset_if_emergency()
+                continue
             if self.state == "IDLE":
                 time.sleep(1)
                 continue
@@ -232,16 +239,23 @@ class Oven(threading.Thread):
         log.info("Zone info: %s" % (self.zones))
 
     def forceOff(self):
-        if 'kiln_tuning' in globals():
-            self.safety_switch.off()
-            for zone in self.zones:
-                zone.forceOff()
+        self.safety_switch.off()
+        self._tuning = False
+        for zone in self.zones:
+            zone.forceOff()
 
     def forceOn(self):
-        if 'kiln_tuning' in globals():
+        if self._tuning:
             self.safety_switch.on()
+            zone: Zone
             for zone in self.zones:
+                zone.enableTuning()
                 zone.forceOn()
+
+    def enableTuning(self):
+        self._tuning = True
+        for zone in self.zones:
+            zone.enableTuning()
 
 
 class SimulatedOven(Oven):

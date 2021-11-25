@@ -17,7 +17,7 @@ class SafetySwitch:
         self._active_value = active_value
         self._pin = digitalio.DigitalInOut(pin)
         self._pin.direction = digitalio.Direction.OUTPUT
-        self._pin.value = self._active_value
+        self.off()
 
     def on(self):
         if self._pin is not None:

@@ -8,8 +8,10 @@ class ZoneConfig:
         self,
         name: str,
         gpio_heat: Pin,
-        thermocouple: MAX31856
+        thermocouple: MAX31856,
+        gpio_active_high: bool = True
     ) -> None:
         self.name = name
         self.gpio_heat = gpio_heat
+        self.gpio_active_high = gpio_active_high
         self.thermocouple = thermocouple
