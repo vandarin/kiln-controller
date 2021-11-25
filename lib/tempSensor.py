@@ -16,6 +16,7 @@ class TempSensor(threading.Thread):
         self.bad_percent = 0
         self.time_step = sensor_time_wait
         self.faulted = False
+        self.start()
 
 
 class TempSensorSimulated(TempSensor):
@@ -37,15 +38,15 @@ class TempSensorReal(TempSensor):
             temperature_average_samples: int = 1,
             offset: float = 0.0,
     ):
-        TempSensor.__init__(self, sensor_time_wait)
         self.temp_scale = temp_scale
         self.temperature_average_samples = temperature_average_samples
-        self.sleeptime = self.time_step / float(temperature_average_samples)
+        self.sleeptime = sensor_time_wait / float(temperature_average_samples)
         self.bad_count = 0
         self.ok_count = 0
         self.bad_stamp = 0
         self.thermocouple = thermocouple
         self.offset = offset
+        TempSensor.__init__(self, sensor_time_wait)
 
     def convert_to_scale(self, value):
         if self.temp_scale.lower() == 'f':

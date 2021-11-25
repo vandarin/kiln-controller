@@ -1,7 +1,7 @@
 from enum import Enum
 
 from microcontroller import Pin
-from lib.output import Output
+from lib.heater import Heater
 import threading
 import time
 from lib.zoneConfig import ZoneConfig
@@ -34,11 +34,10 @@ class Zone(threading.Thread):
         self.heat = 0
         if gpio_heat is not None:
             log.info("Heater output created on %s." % (gpio_heat,))
-            self.output = Output(gpio_heat)
+            self.output = Heater(gpio_heat)
         else:
             self.output = None
             log.warn("No output, temp sensor only")
-        self.temp_sensor.start()
 
         self.time_step = sensor_time_wait
 
@@ -50,8 +49,19 @@ class Zone(threading.Thread):
 
     def run(self):
         while True:
+            # update stats
             Zone.stats[self.zone_index] = self.getStats()
-            time.sleep(self.time_step)
+
+            if self.output is not None:
+                # heater attached, turn it on if needed
+                if self.heat > 0:
+                    self.output.on()
+                time.sleep(self.heat)
+                self.output.off()
+                time.sleep(self.time_step - self.heat)
+            else:
+                # no heater attached, just sleep
+                time.sleep(self.time_step)
 
     def getDelta(self) -> float:
         if self.output is not None:
@@ -101,7 +111,6 @@ class Zone(threading.Thread):
         if self.output is None:
             return
         self.heat = heat_on
-        self.output.heat(heat_on)
 
     def reset(self):
         if self.output is None:

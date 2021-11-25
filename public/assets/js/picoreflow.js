@@ -52,6 +52,12 @@ graphs.live =
     draggable: false
 };
 
+function _c_to_temp_scale(value) {
+    if (temp_scale == 'f') {
+        return (value * 9 / 5) + 32;
+    }
+    return value;
+}
 
 function updateProfile(id) {
     selected_profile = id;
@@ -403,7 +409,20 @@ function getOptions() {
             color: 'rgba(216, 211, 197, 0.55)',
             borderWidth: 1,
             labelMargin: 10,
-            mouseActiveRadius: 50
+            mouseActiveRadius: 50,
+            markings: function (axes) {
+                var markings = [
+                    { yaxis: { from: 0, to: _c_to_temp_scale(100), }, color: 'rgba(0,100,250,0.2)' },
+                    { yaxis: { from: _c_to_temp_scale(600), to: _c_to_temp_scale(700), }, color: 'rgba(120,0,0,0.2)' },
+                    { yaxis: { from: _c_to_temp_scale(700), to: _c_to_temp_scale(900), }, color: 'rgba(255,0,0,0.2)' },
+                    { yaxis: { from: _c_to_temp_scale(900), to: _c_to_temp_scale(1100), }, color: 'rgba(255,153,0,0.2)' },
+                    { yaxis: { from: _c_to_temp_scale(1100), to: _c_to_temp_scale(1300), }, color: 'rgba(255,255,102,0.2)' },
+                ];
+                for (var x = Math.floor(axes.xaxis.min); x < axes.xaxis.max; x += 120 * 60)
+                    markings.push({ xaxis: { from: x, to: x + (60 * 60) }, color: 'rgba(120,120,120,0.2)' });
+                return markings;
+            }
+
         },
 
         legend:
@@ -601,11 +620,11 @@ $(document).ready(function () {
                         x.zones.forEach(zone => {
                             $(`#${zone.Name}_temp`).html(parseInt(zone.Temp));
                             if (zone.Heat > 0.0) {
-                                if (timeout_ids[zone.Name]) {
-                                    clearTimeout(timeout_ids[zone.Name]);
-                                }
-                                setTimeout(function () { $(`#${zone.Name}_heat`).addClass("ds-led-heat-active") }, 0)
-                                timeout_ids[zone.Name] = setTimeout(function () { $(`#${zone.Name}_heat`).removeClass("ds-led-heat-active") }, (x.heat * 1000.0) - 5)
+                                // if (timeout_ids[zone.Name]) {
+                                //     clearTimeout(timeout_ids[zone.Name]);
+                                // }
+                                setTimeout(function () { $(`#${zone.Name}_heat`).addClass("ds-led-heat-active"); }, 0)
+                                timeout_ids[zone.Name] = setTimeout(function () { $(`#${zone.Name}_heat`).removeClass("ds-led-heat-active") }, (zone.Heat * 1000.0) - 5)
                             }
                         });
 

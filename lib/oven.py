@@ -199,6 +199,7 @@ class Oven(threading.Thread):
                                Zone.getAvgTemp())
         heat_on = float(self.time_step * pid)
 
+        zone: Zone
         for zone in self.zones:
             zone_pid = self.calc_zone_pid(pid, zone)
             zone_heat_on = float(self.time_step * zone_pid)
