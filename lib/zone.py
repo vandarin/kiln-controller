@@ -98,8 +98,8 @@ class Zone(threading.Thread):
             'Heated': self.output is not None,
             'Temp': round(self.getTemperature(), 1),
             'Delta': round(self.getDelta(), 1),
-            'Heat': self.heat,
-            'Heat_pct': round(self.heat / self.time_step * 100, 0),
+            'Heat': round(self.heat, 1),
+            'Heat_pct': round(self.heat / self.time_step * 100, 1),
             'Faulted': self.isFaulted(),
         }
 

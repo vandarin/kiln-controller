@@ -32,8 +32,9 @@ def recordprofile(csvfile, targettemp):
         oven = SimulatedOven(config)
     else:
         oven = RealOven(config)
-        # wait a bit for temps to stabilize
-        event.wait(1)
+        print('wait a bit for temps to stabilize')
+        event.wait(7)
+        print('...starting kiln tune')
 
     # open the file to log data to
     f = open(csvfile, 'w')
@@ -121,7 +122,7 @@ def plot(xdata, ydata,
     pyplot.plot([upper_crossing_x, upper_crossing_x],
                 [miny, maxy], '--', color='black')
 
-    pyplot.show()
+    pyplot.savefig('plot.png')
 
 
 def calculate(filename, tangentdivisor, showplot):

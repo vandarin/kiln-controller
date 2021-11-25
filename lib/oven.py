@@ -175,7 +175,7 @@ class Oven(threading.Thread):
         state = {
             'runtime': self.runtime,
             'temperature': Zone.getAvgTemp(),
-            'target': self.target,
+            'target': round(self.target, 2),
             'state': self.state,
             'totaltime': self.totaltime,
             'profile': self.profile.name if self.profile else None,
