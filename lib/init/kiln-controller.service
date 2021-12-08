@@ -3,6 +3,8 @@ Description=kiln-controller
 
 [Service]
 ExecStart=/home/pi/kiln-controller/venv/bin/python /home/pi/kiln-controller/kiln-controller.py
+User=pi
+Group=gpio
 
 [Install]
 WantedBy=multi-user.target

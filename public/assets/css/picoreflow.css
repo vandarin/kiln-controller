@@ -364,3 +364,8 @@ body {
 .legendLabel {
     color: #333;
 }
+
+.progress.active .progress-bar {
+    -webkit-animation: none;
+    animation: none;
+}

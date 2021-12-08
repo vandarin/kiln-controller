@@ -1,8 +1,10 @@
-from lib.max31856 import MAX31856
+import os
+from lib.max31856 import MAX31856, SampleType
 from lib.safetyswitch import SafetySwitch
 from lib.tempSensor import TempSensorSimulated
 from lib.zone import Zone, SimulatedZone
 import board
+import csv
 import digitalio
 import threading
 import time
@@ -12,6 +14,8 @@ import json
 
 log = logging.getLogger(__name__)
 event = threading.Event()
+script_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+runlog_path = os.path.join(script_dir, "storage", "runlog")
 
 
 class Oven(threading.Thread):
@@ -20,6 +24,7 @@ class Oven(threading.Thread):
 
     def __init__(self, config):
         self._tuning = False
+        self.runID = None
         threading.Thread.__init__(self)
         self.daemon = True
         self.temperature = 0
@@ -72,13 +77,14 @@ class Oven(threading.Thread):
                 self.zones.append(zone)
             self.safety_switch = SafetySwitch(
                 config.safety_switch, config.safety_switch_active_value)
-
+        self.hooks = Hooks(config.hook_run_profile, config.hook_reset)
         self.reset()
 
     def reset(self):
         self._tuning = False
         self.state = "IDLE"
         self.profile = None
+        self.runID = None
         self.start_time = 0
         self.runtime = 0
         self.totaltime = 0
@@ -88,6 +94,8 @@ class Oven(threading.Thread):
             zone.reset()
         self.pid = PID(**self.initial_pid_params)
         self.safety_switch.off()
+        if self.hooks.reset:
+            os.system(self.hooks.reset)
 
     def run_profile(self, profile, startat=0):
         self.reset()
@@ -108,7 +116,14 @@ class Oven(threading.Thread):
         self.start_time = datetime.datetime.now()
         self.startat = startat * 60
         self.safety_switch.on()
-        log.info("Starting")
+        self.runID = "%s-%s" % (
+            self.start_time.strftime('%Y%m%d-%H%M'),
+            profile.name
+        )
+        self.write_to_runlog(headers=True)
+        log.info("Starting %s" % (profile,))
+        if self.hooks.run_profile:
+            os.system(self.hooks.run_profile)
 
     def abort_run(self):
         self.reset()
@@ -180,7 +195,7 @@ class Oven(threading.Thread):
             'state': self.state,
             'totaltime': self.totaltime,
             'profile': self.profile.name if self.profile else None,
-            'zones': Zone.stats
+            'zones': Zone.stats.copy()
         }
         return state
 
@@ -200,6 +215,7 @@ class Oven(threading.Thread):
                 self.heat_then_cool()
                 self.reset_if_emergency()
                 self.reset_if_schedule_ended()
+                self.write_to_runlog()
                 event.wait(self.time_step)
 
     def heat_then_cool(self):
@@ -238,6 +254,33 @@ class Oven(threading.Thread):
                   self.totaltime,
                   time_left))
         log.info("Zone info: %s" % (self.zones))
+
+    def write_to_runlog(self, headers=False):
+        if self.runID is None:
+            return
+        filename = '%s.csv' % (self.runID,)
+        with open(os.path.join(runlog_path, filename), 'a', newline='') as csvfile:
+            runwriter = csv.writer(csvfile)
+            if headers:
+                header_row = ['Time', 'Target', 'AVG', 'PID']
+
+                for zone in Zone.stats:
+                    header_row.append(zone['Name'])
+                    header_row.append('%s err' % (zone['Name'],))
+                    header_row.append('%s pow' % (zone['Name'],))
+                runwriter.writerow(header_row)
+
+            row_data = [
+                datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                round(self.target, 1),
+                round(self.temperature, 1),
+                round(self.pid.lastValue, 2)
+            ]
+            for zone in Zone.stats:
+                row_data.append(zone['Temp'])
+                row_data.append(zone['Delta'])
+                row_data.append(zone['Heat_pct'])
+            runwriter.writerow(row_data)
 
     def forceOff(self):
         self.safety_switch.off()
@@ -359,6 +402,7 @@ class PID():
         self.lastNow = datetime.datetime.now()
         self.iterm = 0
         self.lastErr = 0
+        self.lastValue = 0
 
     # FIX - this was using a really small window where the PID control
     # takes effect from -1 to 1. I changed this to various numbers and
@@ -409,6 +453,12 @@ class PID():
             )
 
         return output
+
+
+class Hooks():
+    def __init__(self, run_profile, reset) -> None:
+        self.run_profile = run_profile
+        self.reset = reset
 
 
 def clip(value, lower, upper):
