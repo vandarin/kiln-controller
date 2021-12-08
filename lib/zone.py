@@ -25,7 +25,7 @@ class Zone(threading.Thread):
             sensor_time_wait: int,
             temp_scale: str,
             gpio_active_high: bool = True,
-            temperature_average_samples: int = 1
+            temperature_average_samples: int = 10
     ) -> None:
         self._tuning = False
         threading.Thread.__init__(self)

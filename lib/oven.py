@@ -58,11 +58,12 @@ class Oven(threading.Thread):
                 cs.value = True
                 sensor = MAX31856(
                     spi, cs, chip.tc_type, continuous=True, ac_freq_50hz=config.thermocouples['ac_freq_50hz'],
+                    samples=SampleType.AVG_SEL_4SAMP
                 )
                 sensors.append(sensor)
             for sensor in sensors:
                 # hardcoded safety limits in celsius
-                sensor.temperature_thresholds = (-20.0, 1200)
+                sensor.temperature_thresholds = (-20.0, 1250)
                 sensor.reference_temperature_thresholds = (-20.0, 60.0)
             for zc in config.zones:
                 zone = Zone(
@@ -72,6 +73,7 @@ class Oven(threading.Thread):
                     thermocouple=sensors[zc.thermocouple],
                     sensor_time_wait=config.sensor_time_wait,
                     temp_scale=config.temp_scale,
+                    temperature_average_samples=config.temperature_average_samples
                 )
                 zone.start()
                 self.zones.append(zone)
@@ -231,15 +233,21 @@ class Oven(threading.Thread):
         self.log_heating(pid, heat_on, self.time_step - heat_on)
 
     def calc_zone_pid(self, pid: float, zone: Zone) -> float:
+        if pid <= 0:
+            return 0
         range = zone.getTempRange()
-        if pid > 0 and range > self.zone_max_lag:
-            delta = zone.getDelta()
-            # if delta is positive, pid decreases
-            # if delta is negative, pid increases
-            return clip(pid - (delta / range), 0, 1)
+        if range == 0:
+            return pid
+        delta = zone.getDelta()
+        # if delta is positive, pid decreases
+        # if delta is negative, pid increases
+        factor = clip(delta / range, -0.2, 0.5)
 
-        # range is within tolerance, no adjustment needed
-        return pid
+        # if delta > self.zone_max_lag:
+        #     factor = factor * 1.4
+        if delta < -1 * self.zone_max_lag:
+            return 1
+        return clip(pid - factor, 0, 1)
 
     def log_heating(self, pid, heat_on, heat_off):
         time_left = self.totaltime - self.runtime
@@ -418,6 +426,9 @@ class PID():
         error = float(setpoint - ispoint)
 
         if self.ki > 0:
+            # reset iterm when we cross the setpoint
+            if sorted([error, 0, self.lastErr])[1] == 0:
+                self.iterm = 0
             if self.stop_integral_windup == True:
                 if abs(self.kp * error) < window_size:
                     self.iterm += (error * timeDelta * (1/self.ki))
@@ -451,7 +462,7 @@ class PID():
                     self.kd * dErr
                 )
             )
-
+        self.lastValue = output
         return output
 
 

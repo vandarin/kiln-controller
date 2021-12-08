@@ -36,12 +36,13 @@ class TempSensorReal(TempSensor):
             thermocouple: MAX31856,
             sensor_time_wait: int,
             temp_scale: str,
-            temperature_average_samples: int = 1,
+            temperature_average_samples: int = 10,
             offset: float = 0.0,
     ):
         self.temp_scale = temp_scale
         self.temperature_average_samples = temperature_average_samples
-        self.sleeptime = sensor_time_wait / float(temperature_average_samples)
+        self.sleeptime = max(1.0, sensor_time_wait /
+                             float(temperature_average_samples))
         self.bad_count = 0
         self.ok_count = 0
         self.bad_stamp = 0
@@ -55,7 +56,7 @@ class TempSensorReal(TempSensor):
         return value
 
     def run(self):
-        '''use a moving average of config.temperature_average_samples across the time_step'''
+        '''use a moving average of config.temperature_average_samples'''
         temps = []
         while True:
             # reset error counter if time is up
