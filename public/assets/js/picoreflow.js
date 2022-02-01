@@ -1,3 +1,4 @@
+var plot = false;
 var state = "IDLE";
 var state_last = "";
 var graphs = {};
@@ -352,7 +353,9 @@ function saveProfile() {
 }
 
 function getOptions() {
-
+    if (plot) {
+        return plot.getOptions();
+    }
     var options =
     {
         series:
@@ -375,6 +378,9 @@ function getOptions() {
         xaxis:
         {
             min: 0,
+
+            zoomRange: [720, null],
+            panRange: [0, 86400],
             tickColor: 'rgba(216, 211, 197, 0.2)',
             tickFormatter: timeTickFormatter,
             font:
@@ -393,6 +399,8 @@ function getOptions() {
             tickDecimals: 0,
             draggable: false,
             tickColor: 'rgba(216, 211, 197, 0.2)',
+            zoomRange: [60, null],
+            panRange: [60, 2300],
             font:
             {
                 size: 14,
@@ -429,9 +437,16 @@ function getOptions() {
         {
             show: true,
             position: 'se',
+        },
+        zoom: {
+            interactive: true,
+            enableTouch: true,
+        },
+        pan: {
+            interactive: true,
+            enableTouch: true,
         }
     }
-
     return options;
 
 }
@@ -510,7 +525,9 @@ $(document).ready(function () {
             ws_storage = new WebSocket(host + "/storage");
 
             // Status Socket ////////////////////////////////
+            function reconnectBackOff() {
 
+            }
             ws_status.onopen = function () {
                 console.log("Status Socket has been opened");
 
@@ -538,6 +555,9 @@ $(document).ready(function () {
                     allow_dismiss: true,
                     stackup_spacing: 10 // spacing between consecutively stacked growls.
                 });
+                setTimeout(() => {
+                    openSockets
+                }, 1000);
             };
 
             ws_status.onmessage = function (e) {

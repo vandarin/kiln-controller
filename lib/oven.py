@@ -227,7 +227,7 @@ class Oven(threading.Thread):
 
         zone: Zone
         for zone in self.zones:
-            zone_pid = self.calc_zone_pid(pid, zone)
+            zone_pid = clip(self.calc_zone_pid(pid, zone), 0, 1)
             zone_heat_on = float(self.time_step * zone_pid)
             zone.heat_for(zone_heat_on)
         self.log_heating(pid, heat_on, self.time_step - heat_on)
@@ -235,19 +235,19 @@ class Oven(threading.Thread):
     def calc_zone_pid(self, pid: float, zone: Zone) -> float:
         if pid <= 0:
             return 0
-        range = zone.getTempRange()
-        if range == 0:
-            return pid
-        delta = zone.getDelta()
-        # if delta is positive, pid decreases
-        # if delta is negative, pid increases
-        factor = clip(delta / range, -0.2, 0.5)
+        zone_error = zone.getTemperature() - self.target
 
-        # if delta > self.zone_max_lag:
-        #     factor = factor * 1.4
-        if delta < -1 * self.zone_max_lag:
-            return 1
-        return clip(pid - factor, 0, 1)
+        if zone_error > self.zone_max_lag:
+            # above the setpoint, decrease power on time
+            return pid * 0.8
+        if zone.getTemperature() > self.target and zone.getTempRange() > self.zone_max_lag * 2:
+            # above the setpoint and another zone is lagging, decrease power on time
+            return pid * 0.9
+        if zone_error < 0 - self.zone_max_lag:
+            # below the setpoint, increase power on time
+            return pid * 2.5
+        # all zones within allowed variance, follow PID loop
+        return pid
 
     def log_heating(self, pid, heat_on, heat_off):
         time_left = self.totaltime - self.runtime
@@ -425,16 +425,6 @@ class PID():
 
         error = float(setpoint - ispoint)
 
-        if self.ki > 0:
-            # reset iterm when we cross the setpoint
-            if sorted([error, 0, self.lastErr])[1] == 0:
-                self.iterm = 0
-            if self.stop_integral_windup == True:
-                if abs(self.kp * error) < window_size:
-                    self.iterm += (error * timeDelta * (1/self.ki))
-            else:
-                self.iterm += (error * timeDelta * (1/self.ki))
-
         dErr = (error - self.lastErr) / timeDelta
         output = self.kp * error + self.iterm + self.kd * dErr
         out4logs = output
@@ -448,20 +438,26 @@ class PID():
 
         output = float(output / window_size)
 
-        if out4logs > 0:
-            #            log.info("pid percents pid=%0.2f p=%0.2f i=%0.2f d=%0.2f" % (out4logs,
-            #                ((self.kp * error)/out4logs)*100,
-            #                (self.iterm/out4logs)*100,
-            #                ((self.kd * dErr)/out4logs)*100))
-            log.info(
-                "pid actuals pid=%0.2f p=%0.2f i=%0.2f d=%0.2f"
-                % (
-                    out4logs,
-                    self.kp * error,
-                    self.iterm,
-                    self.kd * dErr
-                )
+        if self.ki > 0 and out4logs < 150:
+            if self.stop_integral_windup == True:
+                if abs(self.kp * error) < window_size:
+                    self.iterm += (error * timeDelta * (1/self.ki))
+            else:
+                self.iterm += (error * timeDelta * (1/self.ki))
+
+        #            log.info("pid percents pid=%0.2f p=%0.2f i=%0.2f d=%0.2f" % (out4logs,
+        #                ((self.kp * error)/out4logs)*100,
+        #                (self.iterm/out4logs)*100,
+        #                ((self.kd * dErr)/out4logs)*100))
+        log.info(
+            "pid actuals pid=%0.2f p=%0.2f i=%0.2f d=%0.2f"
+            % (
+                out4logs,
+                self.kp * error,
+                self.iterm,
+                self.kd * dErr
             )
+        )
         self.lastValue = output
         return output
 

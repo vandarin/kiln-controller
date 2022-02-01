@@ -42,15 +42,15 @@ for chip in config.thermocouples['chips']:
 for idx, sensor in enumerate(sensors):
     time.sleep(0.2)
 
-    sensor.temperature_thresholds = (0.0, 1200)
+    sensor.temperature_thresholds = (0.0, 1250)
     sensor.reference_temperature_thresholds = (0.0, 50.0)
 
 
 while True:
     time.sleep(0.2)
     for idx, sensor in enumerate(sensors):
-        print("%d Thresholds: TC: %s , CJ: %s" %
-              (idx, sensor.temperature_thresholds, sensor.reference_temperature_thresholds,))
+        # print("%d Thresholds: TC: %s , CJ: %s" %
+        #   (idx, sensor.temperature_thresholds, sensor.reference_temperature_thresholds,))
         print(
             "%d: %0.1f• :> %0.1f"
             % (idx, sensor.temperature,
