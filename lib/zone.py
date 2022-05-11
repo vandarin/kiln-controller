@@ -25,12 +25,14 @@ class Zone(threading.Thread):
             sensor_time_wait: int,
             temp_scale: str,
             gpio_active_high: bool = True,
-            temperature_average_samples: int = 10
+            temperature_average_samples: int = 10,
+            power_adjust: float = 1.0
     ) -> None:
         self._tuning = False
         threading.Thread.__init__(self)
         self.daemon = True
         self.zone_name = name
+        self.power_adjust = power_adjust
         self.temp_sensor = TempSensorReal(
             thermocouple, sensor_time_wait, temp_scale, temperature_average_samples
         )
@@ -110,6 +112,7 @@ class Zone(threading.Thread):
     def getFaults(self) -> dict:
         return self.temp_sensor.fault
 
+    # return single zone temp
     def getTemperature(self) -> float:
         return self.temp_sensor.temperature
 

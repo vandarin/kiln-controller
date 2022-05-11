@@ -233,9 +233,12 @@ class Oven(threading.Thread):
         self.log_heating(pid, heat_on, self.time_step - heat_on)
 
     def calc_zone_pid(self, pid: float, zone: Zone) -> float:
-        if pid <= 0:
-            return 0
         zone_error = zone.getTemperature() - self.target
+        if pid <= 0:
+            if zone_error < 0 - self.zone_max_lag:
+                # zone is lagging and others are off, force power on
+                return 0.15
+            return 0
 
         if zone_error > self.zone_max_lag:
             # above the setpoint, decrease power on time
@@ -243,11 +246,14 @@ class Oven(threading.Thread):
         if zone.getTemperature() > self.target and zone.getTempRange() > self.zone_max_lag * 2:
             # above the setpoint and another zone is lagging, decrease power on time
             return pid * 0.9
+        if zone.getTemperature() > self.temperature and zone.getTempRange() > self.zone_max_lag:
+            # above the average and another zone is lagging, decrease power on time
+            return pid * 0.95
         if zone_error < 0 - self.zone_max_lag:
-            # below the setpoint, increase power on time
+            # zone is lagging, increase power on time
             return pid * 2.5
         # all zones within allowed variance, follow PID loop
-        return pid
+        return pid * zone.power_adjust
 
     def log_heating(self, pid, heat_on, heat_off):
         time_left = self.totaltime - self.runtime
@@ -438,17 +444,14 @@ class PID():
 
         output = float(output / window_size)
 
-        if self.ki > 0 and out4logs < 150:
+        if self.ki > 0 and out4logs < 120:
+            # TODO: should the out4logs test be < 100 ??
             if self.stop_integral_windup == True:
                 if abs(self.kp * error) < window_size:
                     self.iterm += (error * timeDelta * (1/self.ki))
             else:
                 self.iterm += (error * timeDelta * (1/self.ki))
 
-        #            log.info("pid percents pid=%0.2f p=%0.2f i=%0.2f d=%0.2f" % (out4logs,
-        #                ((self.kp * error)/out4logs)*100,
-        #                (self.iterm/out4logs)*100,
-        #                ((self.kd * dErr)/out4logs)*100))
         log.info(
             "pid actuals pid=%0.2f p=%0.2f i=%0.2f d=%0.2f"
             % (
